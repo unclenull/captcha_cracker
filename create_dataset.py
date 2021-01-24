@@ -1,18 +1,17 @@
 import os
-import argparse
 from captcha.image import ImageCaptcha
 from random import randint
-import string
+from utils import parse_args
 
 
-def gen_captcha(count, captcha_len, classes, folder):
+def gen_captcha(count, width, classes, folder):
     for j in range(count):
         if j % 100 == 0:
             print(j)
 
         while True:
             chars = ''
-            for i in range(captcha_len):
+            for i in range(width):
                 rand_num = randint(0, 61)
                 chars += classes[rand_num]
             filename = '{}/{}.jpg'.format(folder, chars)
@@ -29,40 +28,46 @@ def gen_captcha(count, captcha_len, classes, folder):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '-c',
-        '--count',
-        type=int,
-        help='total number of captchas')
+    extra = [(
+        ('-c', '--count'),
+        dict(
+            type=int,
+            help='total number of captchas'
+        )
+    ), (
+        ('-t', '--test'),
+        dict(
+            default=0.1,
+            type=float,
+            help='ratio of test dataset.'
+        )
+    )]
 
-    parser.add_argument(
-        '-d', '--digit',
-        action='store_true',
-        help='use digits in dataset.')
-    parser.add_argument(
-        '-l', '--lower',
-        action='store_true',
-        help='use lowercase in dataset.')
-    parser.add_argument(
-        '-u', '--upper',
-        action='store_true',
-        help='use uppercase in dataset.')
-    parser.add_argument(
-        '--npi',
-        default=1,
-        type=int,
-        help='number of characters per image.')
-    parser.add_argument(
-        '--data_dir',
-        default='./images',
-        type=str,
-        help='where data will be saved.')
-    FLAGS, unparsed = parser.parse_known_args()
-# count = 50000
-count = 1
-captcha_len = 4
-    list = [chr(i) for i in range(48, 58)] + [chr(i) for i in range(65, 91)] + [chr(i) for i in range(97, 123)]
+    FLAGS = parse_args(extra)
+    classes, base_dataset_dir, base_dataset_name, width = FLAGS.classes, FLAGS.base_dataset_dir, FLAGS.base_dataset_name, FLAGS.width
 
-classes = string.digits + string.ascii_lowercase + string.ascii_uppercase
-gen_captcha(count, captcha_len, classes, folder)
+    len_classes = len(classes)
+    if len_classes == 0:
+        print('No char range set!')
+        exit()
+
+    count = FLAGS.count
+    if count is None:
+        count = len_classes * 1000
+
+    count_test = int(count * FLAGS.test)
+    count_train = count - count_test
+
+    runs = []
+    if count_train > 0:
+        runs.append((count_train, '{}/{}/train'.format(base_dataset_dir, base_dataset_name)))
+    if count_test > 0:
+        runs.append((count_test, '{}/{}/test'.format(base_dataset_dir, base_dataset_name)))
+
+    for c, f in runs:
+        print('Generating into {}... (count: {}, width: {}, classes: {})'.format(f, c, width, len_classes))
+        command = input('Type Enter/n:')
+        if command != 'n':
+            if not os.path.exists(f):
+                os.makedirs(f)
+            gen_captcha(count=c, width=width, classes=classes, folder=f)
