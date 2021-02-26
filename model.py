@@ -5,21 +5,30 @@ from math import ceil
 from pandas import DataFrame
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from tensorflow.keras.applications.xception import preprocess_input
-from tensorflow.keras.models import load_model
+from tensorflow.keras.models import Model, load_model
+from tensorflow.keras.utils import plot_model
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.layers import Dense
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from utils import parse_args, parse_label, show_metrics, show_test, create_model
+from utils import parse_args, parse_label, show_metrics, show_test
 
 
-def _create_generator(augment_args=None):
-    args = dict(
-        preprocessing_function=preprocess_input,
-        rotation_range=20,
-        width_shift_range=0.1,
-        height_shift_range=0.1,
-        shear_range=0.2,
-        zoom_range=0.1,
-        channel_shift_range=0.2,
-    )
+def _create_generator(augment_args=None, preprocess=True):
+    if augment_args is False:
+        args = {}
+        augment_args = None
+    else:
+        args = dict(
+            rotation_range=20,
+            width_shift_range=0.1,
+            height_shift_range=0.1,
+            shear_range=0.2,
+            zoom_range=0.1,
+            channel_shift_range=0.2,
+        )
+
+    if preprocess is True:
+        args['preprocessing_function'] = preprocess_input
 
     if augment_args is not None:
         args.update(augment_args)
@@ -27,7 +36,7 @@ def _create_generator(augment_args=None):
     return ImageDataGenerator(**args)
 
 
-def _get_gen(folder, files, target_size, FLAGS, augment_args):
+def _get_gen(folder, files, target_size, augment_args):
     df = DataFrame()
     df['filename'] = files
     labels = np.array([parse_label(img, FLAGS.classes) for img in files])
@@ -58,27 +67,53 @@ def _get_shape(folder):
     return cv2.imread(f'{folder}/{filename}').shape
 
 
-def aug(FLAGS, extra):
+def show_aug(extra):
     folder = f'{FLAGS.dataset_path}/'
-    _create_generator({'preprocessing_function': None}) \
+    folder_target = 'aug_showcase'
+    if not os.path.exists(folder_target):
+        os.mkdir(folder_target)
+
+    _create_generator(extra if FLAGS.augment else False, False) \
         .flow_from_directory(
             folder,
-            save_to_dir='tmp',
+            save_to_dir=folder_target,
             target_size=_get_shape(f'{folder}/train')[:2]
-        ).next()
+        ).next()  # noqa
+
+    print(f'Sample augmented images are saved in {folder_target}')
 
 
-def train(FLAGS, extra):
+def create_model():
+    # import pdb; pdb.set_trace()
+    base_model = load_model(FLAGS.base_model_path)
+    base_model.trainable = False
+    x = base_model.layers[-1].output
+
+    predicts = [Dense(len(FLAGS.classes), activation='softmax')(x) for i in range(FLAGS.size)]
+
+    model = Model(inputs=base_model.input, outputs=predicts)
+
+    model.compile(
+        optimizer=Adam(),
+        loss='sparse_categorical_crossentropy',
+        metrics=['accuracy']
+    )
+    model.summary()
+    plot_path = f'{FLAGS.model_dir}/{FLAGS.classes_name}_model.png'
+    plot_model(model, show_shapes=True, show_layer_names=True, to_file=plot_path)
+    return model
+
+
+def train(extra):
     train_folder = f'{FLAGS.dataset_path}/train/'
     test_folder = f'{FLAGS.dataset_path}/test/'
     train_samples = os.listdir(train_folder)
     nb_train = len(train_samples)
     test_samples = os.listdir(test_folder)
     nb_test = len(test_samples)
-    img_shape = cv2.imread(f'{train_folder}/{train_samples[0]}').shape
 
-    if not os.path.exists(FLAGS.models_dir):
-        os.mkdir(FLAGS.models_dir)
+    if not os.path.exists(FLAGS.model_dir):
+        os.mkdir(FLAGS.model_dir)
 
     callbacks = [
         ModelCheckpoint(
@@ -90,56 +125,86 @@ def train(FLAGS, extra):
         EarlyStopping(
             monitor='val_loss',
             min_delta=0.0001,
-            patience=2,
+            patience=FLAGS.patience,
             verbose=1
         )
     ]
 
-    model = create_model(False, img_shape, FLAGS)
-    model.load_weights(FLAGS.base_model_path)
-    model.summary()
+    model = create_model()
+    img_shape = model.input.shape[1:]
 
     history = model.fit(
-        _get_gen(train_folder, train_samples, img_shape[:2], FLAGS, extra),
+        _get_gen(train_folder, train_samples, img_shape[:2], extra if FLAGS.augment else False),
         steps_per_epoch=ceil(nb_train / FLAGS.batch_size),
         epochs=99,
-        validation_data=_get_gen(test_folder, test_samples, img_shape[:2], FLAGS, extra),
+        validation_data=_get_gen(test_folder, test_samples, img_shape[:2], extra if FLAGS.augment else False),
         validation_steps=ceil(nb_test / FLAGS.batch_size),
         callbacks=callbacks,
     )
 
     print('Training done.')
-    show_metrics(history, FLAGS.size, f"{FLAGS.models_dir}/{FLAGS.classes_name}_metrics.png")
+    show_metrics(history, FLAGS.size, f"{FLAGS.model_dir}/{FLAGS.classes_name}_metrics.png")
 
 
-def test(FLAGS, extra):
+def test():
     model = load_model(FLAGS.model_path)
+    # model = load_model('model/4_dul - 副本.h5')
+    # model = load_model(FLAGS.base_model_path)
+    # import pdb; pdb.set_trace()
 
     test_folder = f'{FLAGS.dataset_path}/test/'
     test_samples = os.listdir(test_folder)
     nb_test = len(test_samples)
-    img_shape = cv2.imread(f'{test_folder}/{test_samples[0]}').shape
+    img_shape = model.input.shape[1:]
 
     # evaluate all
     print('Evaluating')
-    gen = _get_gen(test_folder, test_samples, img_shape[:2], FLAGS, extra)
+    gen = _get_gen(test_folder, test_samples, img_shape[:2], False)
     model.evaluate(gen, steps=ceil(nb_test / FLAGS.batch_size), verbose=1)
 
     # show a batch
-    show_size = 32
-    gen = _get_gen(test_folder, test_samples, img_shape[:2], FLAGS, extra)
+    gen = _get_gen(test_folder, test_samples, img_shape[:2], False)
     images_test, labels_test_raw = next(gen)
-    labels_true = [np.array(labels_test_raw)[:, i] for i in range(show_size)]
+    labels_true = [np.array(labels_test_raw)[:, i] for i in range(FLAGS.batch_size)]
 
     labels_pred_raw = model.predict_on_batch(images_test)
     labels_pred = np.array(labels_pred_raw).argmax(axis=-1)
-    labels_pred = [np.array(labels_pred)[:, i] for i in range(show_size)]
-    # import pdb; pdb.set_trace()
+    labels_pred = [np.array(labels_pred)[:, i] for i in range(FLAGS.batch_size)]
 
     show_test(images_test, labels_true, labels_pred, FLAGS.classes)
 
 
 if __name__ == '__main__':
-    FLAGS, extra = parse_args([(('cmd',),)])
+    FLAGS, extra = parse_args([
+        (
+            ('-t', '--trainable'),
+            {
+                'default': 0,
+                'type': float,
+                'help': 'ratio of trainable layers',
+            }
+        ),
+        (
+            ('--lr', '--learning-rate'),
+            {
+                'default': 0.001,
+                'type': float,
+            }
+        ),
+        (
+            ('-p', '--patience'),
+            {
+                'default': 3,
+                'type': int,
+            }
+        ),
+        (
+            ('-a', '--augment'),
+            {
+                'action': 'store_true',
+            }
+        ),
+        (('cmd', ), {'help': 'train, test, show_aug'}),
+    ])
 
-    globals()[FLAGS.cmd](FLAGS, extra)
+    globals()[FLAGS.cmd](extra)

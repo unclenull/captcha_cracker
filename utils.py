@@ -2,18 +2,15 @@ import numpy as np
 from math import ceil
 import argparse
 import string
-from tensorflow.keras.utils import plot_model
-from tensorflow.keras.layers import Input, Dense, Dropout
-from tensorflow.keras.applications.xception import Xception, preprocess_input
-from tensorflow.keras.models import Model
+from tensorflow.keras.applications.xception import preprocess_input
 import matplotlib.pyplot as plt
 import pandas as pd
 import cv2
 
 DIR_DATASET = 'dataset'
 DIR_DATASET_BASE = 'dataset_base'
-DIR_MODELS = 'models'
-DIR_MODELS_BASE = 'models_base'
+DIR_MODELS = 'model'
+DIR_MODELS_BASE = 'model_base'
 
 
 def parse_args(extra=None):
@@ -21,15 +18,15 @@ def parse_args(extra=None):
     parser.add_argument(
         '-d', '--digit',
         action='store_true',
-        help='use digits in dataset.')
+        help='including digits')
     parser.add_argument(
         '-l', '--lower',
         action='store_true',
-        help='use lowercase in dataset.')
+        help='including lowercase chars.')
     parser.add_argument(
         '-u', '--upper',
         action='store_true',
-        help='use uppercase in dataset.')
+        help='including uppercase chars.')
     parser.add_argument(
         '-w', '--size',
         default=4,
@@ -44,22 +41,22 @@ def parse_args(extra=None):
         '--base_dataset_dir',
         default=DIR_DATASET_BASE,
         type=str,
-        help='where the generated captchas will be saved.')
+        help='where the fake captchas are saved.')
     parser.add_argument(
         '--dataset_dir',
         default=DIR_DATASET,
         type=str,
-        help='where the captchas will be saved.')
+        help='where the real captchas are saved.')
     parser.add_argument(
-        '--models_dir',
+        '--model_dir',
         default=DIR_MODELS,
         type=str,
-        help='where the models will be saved.')
+        help='where the model for real is saved.')
     parser.add_argument(
-        '--base_models_dir',
+        '--base_model_dir',
         default=DIR_MODELS_BASE,
         type=str,
-        help='where the base models will be saved.')
+        help='where the model for synthetic is saved.')
 
     if extra is not None:
         for arg in extra:
@@ -67,6 +64,7 @@ def parse_args(extra=None):
 
     FLAGS, unparsed = parser.parse_known_args()
 
+    # import pdb; pdb.set_trace()
     len_extra = len(unparsed)
     if len_extra > 0:
         extra = {}
@@ -97,8 +95,8 @@ def parse_args(extra=None):
     FLAGS.classes_name = f'{FLAGS.size}_{name}'
     FLAGS.base_dataset_path = f'{FLAGS.base_dataset_dir}/{FLAGS.classes_name}'
     FLAGS.dataset_path = f'{FLAGS.dataset_dir}/{FLAGS.classes_name}'
-    FLAGS.base_model_path = f'{FLAGS.base_models_dir}/{FLAGS.classes_name}.h5'
-    FLAGS.model_path = f'{FLAGS.models_dir}/{FLAGS.classes_name}.h5'
+    FLAGS.base_model_path = f'{FLAGS.base_model_dir}/{FLAGS.classes_name}_base.h5'
+    FLAGS.model_path = f'{FLAGS.model_dir}/{FLAGS.classes_name}.h5'
     return FLAGS, extra
 
 
@@ -203,22 +201,3 @@ def show_test(images_test, labels_true, labels_pred, classes):
     fig.subplots_adjust(hspace=12)
     plt.tight_layout()
     plt.show()
-
-
-def create_model(with_weights, img_shape, FLAGS):
-    input_image = Input(shape=img_shape)
-
-    base_model = Xception(
-        input_tensor=input_image,
-        weights='imagenet' if with_weights else None,
-        include_top=False,
-        pooling='avg'
-    )
-
-    predicts = [Dense(len(FLAGS.classes), activation='softmax')(Dropout(0.5)(base_model.output)) for i in range(FLAGS.size)]
-
-    model = Model(inputs=input_image, outputs=predicts)
-    model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
-    model.summary()
-    plot_model(model, show_shapes=True, show_layer_names=True, to_file=f'{FLAGS.base_models_dir}/{FLAGS.classes_name}.png')
-    return model
