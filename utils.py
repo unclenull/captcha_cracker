@@ -127,28 +127,35 @@ def data_generator(images, batch_size, img_shape, letter_count, classes, no_firs
                     import pdb
                     pdb.set_trace()
                 y = np.array(y)
-                yield x, [y[:, i] for i in range(letter_count)]
+                if letter_count > 1:
+                    y = [y[:, i] for i in range(letter_count)]
+                else:  # array will trigger error
+                    y = y[:, 0]
+                yield x, y
                 x, y = [], []
         # epoch ends
         if len(x) > 0:  # the last batch doesn't have enough
             y = np.array(y)
-            yield x, [y[:, i] for i in range(letter_count)]
+            if letter_count > 1:
+                y = [y[:, i] for i in range(letter_count)]
+            else:  # array will trigger error
+                y = y[:, 0]
+            yield x, y
 
 
-def show_metrics(history, dense_count, save_path):
+def show_metrics(history, char_count, save_path):
     fig, axes = plt.subplots(1, 2, figsize=(20, 5))
     epochs = len(history.history['loss'])
     history = pd.DataFrame(history.history)
 
     loss_fields = ['loss', 'val_loss']
-    if dense_count > 1:
+    if char_count > 1:
         accuracy_fields = []
-        for i in range(dense_count):
-            ix = '' if i == 0 else '_' + str(i)
-            accuracy_fields.append('dense{}_accuracy'.format(ix))
-            accuracy_fields.append('val_dense{}_accuracy'.format(ix))
-            loss_fields.append('dense{}_loss'.format(ix))
-            loss_fields.append('val_dense{}_loss'.format(ix))
+        for i in range(char_count):
+            accuracy_fields.append(f'c{i}_accuracy')
+            accuracy_fields.append(f'val_c{i}_accuracy')
+            loss_fields.append(f'c{i}_loss')
+            loss_fields.append(f'val_c{i}_loss')
     else:
         accuracy_fields = ['accuracy', 'val_accuracy']
 

@@ -5,11 +5,11 @@ from math import ceil
 from pandas import DataFrame
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from tensorflow.keras.applications.xception import preprocess_input
-from tensorflow.keras.models import Model, load_model
+from tensorflow.keras.models import load_model, Model
 from tensorflow.keras.utils import plot_model
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.layers import Dense
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.layers import BatchNormalization, Flatten, Dense, Dropout
 from utils import parse_args, parse_label, show_metrics, show_test
 
 
@@ -67,13 +67,13 @@ def _get_shape(folder):
     return cv2.imread(f'{folder}/{filename}').shape
 
 
-def show_aug(extra):
+def show_aug():
     folder = f'{FLAGS.dataset_path}/'
     folder_target = 'aug_showcase'
     if not os.path.exists(folder_target):
         os.mkdir(folder_target)
 
-    _create_generator(extra if FLAGS.augment else False, False) \
+    _create_generator(EXTRA if FLAGS.augment else False, False) \
         .flow_from_directory(
             folder,
             save_to_dir=folder_target,
@@ -84,17 +84,18 @@ def show_aug(extra):
 
 
 def create_model():
-    # import pdb; pdb.set_trace()
     base_model = load_model(FLAGS.base_model_path)
     base_model.trainable = False
-    x = base_model.layers[-1].output
 
-    predicts = [Dense(len(FLAGS.classes), activation='softmax')(x) for i in range(FLAGS.size)]
-
+    x = base_model.layers[- 1 - FLAGS.size].output
+    x = Flatten(name="flatten")(x)
+    x = Dense(256, activation="relu")(x)
+    x = Dropout(0.2, name='dropout_refining')(x)
+    predicts = [Dense(len(FLAGS.classes), name=f'c{i}', activation='softmax')(x) for i in range(FLAGS.size)]
     model = Model(inputs=base_model.input, outputs=predicts)
 
     model.compile(
-        optimizer=Adam(),
+        optimizer=Adam(lr=FLAGS.lr),
         loss='sparse_categorical_crossentropy',
         metrics=['accuracy']
     )
@@ -104,7 +105,49 @@ def create_model():
     return model
 
 
-def train(extra):
+def create_model2():
+    if FLAGS.retrain:
+        if FLAGS.trainable == 0:
+            print('No trainable is set for retraining')
+            exit()
+        model = load_model(FLAGS.model_path)
+    else:
+        model = load_model(FLAGS.base_model_path)
+        if FLAGS.new:
+            x = model.layers[- 1 - FLAGS.size].output
+            x = Flatten(name="flatten")(x)
+            x = Dense(256, activation="relu")(x)
+            x = Dropout(0.2, name='dropout_refining')(x)
+            predicts = [Dense(len(FLAGS.classes), name=f'c{i}', activation='softmax')(x) for i in range(FLAGS.size)]
+            model = Model(inputs=model.input, outputs=predicts)
+
+            FLAGS.trainable = 0  # warm up
+
+    layers_count = len(model.layers)
+    if FLAGS.trainable > 0:
+        endIndex = ceil(layers_count * (1 - FLAGS.trainable))
+    else:  # only the classifiers
+        endIndex = layers_count - FLAGS.size
+    print(f'Trainable layers count: {layers_count - endIndex}')
+
+    for layer in model.layers[:endIndex]:
+        layer.trainable = False
+
+    for layer in model.layers[endIndex:]:
+        layer.trainable = not isinstance(layer, BatchNormalization)
+
+    model.compile(
+        optimizer=Adam(lr=FLAGS.lr),
+        loss='sparse_categorical_crossentropy',
+        metrics=['accuracy']
+    )
+    model.summary()
+    plot_path = f'{FLAGS.model_dir}/{FLAGS.classes_name}_model.png'
+    plot_model(model, show_shapes=True, show_layer_names=True, to_file=plot_path)
+    return model
+
+
+def train():
     train_folder = f'{FLAGS.dataset_path}/train/'
     test_folder = f'{FLAGS.dataset_path}/test/'
     train_samples = os.listdir(train_folder)
@@ -134,10 +177,10 @@ def train(extra):
     img_shape = model.input.shape[1:]
 
     history = model.fit(
-        _get_gen(train_folder, train_samples, img_shape[:2], extra if FLAGS.augment else False),
+        _get_gen(train_folder, train_samples, img_shape[:2], EXTRA if FLAGS.augment else False),
         steps_per_epoch=ceil(nb_train / FLAGS.batch_size),
-        epochs=99,
-        validation_data=_get_gen(test_folder, test_samples, img_shape[:2], extra if FLAGS.augment else False),
+        epochs=999,
+        validation_data=_get_gen(test_folder, test_samples, img_shape[:2], EXTRA if FLAGS.augment else False),
         validation_steps=ceil(nb_test / FLAGS.batch_size),
         callbacks=callbacks,
     )
@@ -175,7 +218,14 @@ def test():
 
 
 if __name__ == '__main__':
-    FLAGS, extra = parse_args([
+    FLAGS, EXTRA = parse_args([
+        (
+            ('-n', '--new'),
+            {
+                'action': 'store_true',
+                'help': 'create new model classifiers',
+            }
+        ),
         (
             ('-t', '--trainable'),
             {
@@ -187,7 +237,7 @@ if __name__ == '__main__':
         (
             ('--lr', '--learning-rate'),
             {
-                'default': 0.001,
+                'default': 0.0001,
                 'type': float,
             }
         ),
@@ -204,7 +254,14 @@ if __name__ == '__main__':
                 'action': 'store_true',
             }
         ),
+        (
+            ('-r', '--retrain'),
+            {
+                'action': 'store_true',
+                'help': 'further training with new trainable ratio',
+            }
+        ),
         (('cmd', ), {'help': 'train, test, show_aug'}),
     ])
 
-    globals()[FLAGS.cmd](extra)
+    globals()[FLAGS.cmd]()

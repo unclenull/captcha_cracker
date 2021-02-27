@@ -26,18 +26,18 @@ def _gen_data(images, img_shape, no_first=False):
 
 def create_model(img_shape):
     base_model = Xception(
+        input_tensor=Input(shape=img_shape),
         weights=None,
         include_top=False,
         pooling='avg'
     )
     # import pdb; pdb.set_trace()
-    input_layer = Input(shape=img_shape)
-    x = base_model(input_layer)
+    x = base_model.output
     x = Dropout(0.5)(x)
 
-    predicts = [Dense(len(FLAGS.classes), activation='softmax')(x) for i in range(FLAGS.size)]
+    predicts = [Dense(len(FLAGS.classes), name=f'c{i}', activation='softmax')(x) for i in range(FLAGS.size)]
 
-    model = Model(inputs=input_layer, outputs=predicts)
+    model = Model(inputs=base_model.input, outputs=predicts)
 
     model.compile(
         optimizer=Adam(),
@@ -119,6 +119,6 @@ def test():
 
 
 if __name__ == '__main__':
-    FLAGS, unparsed = parse_args([(('cmd', ), {'help': 'train, test'})])
+    FLAGS, EXTRA = parse_args([(('cmd', ), {'help': 'train, test'})])
 
     globals()[FLAGS.cmd]()
