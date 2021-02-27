@@ -84,28 +84,6 @@ def show_aug():
 
 
 def create_model():
-    base_model = load_model(FLAGS.base_model_path)
-    base_model.trainable = False
-
-    x = base_model.layers[- 1 - FLAGS.size].output
-    x = Flatten(name="flatten")(x)
-    x = Dense(256, activation="relu")(x)
-    x = Dropout(0.2, name='dropout_refining')(x)
-    predicts = [Dense(len(FLAGS.classes), name=f'c{i}', activation='softmax')(x) for i in range(FLAGS.size)]
-    model = Model(inputs=base_model.input, outputs=predicts)
-
-    model.compile(
-        optimizer=Adam(lr=FLAGS.lr),
-        loss='sparse_categorical_crossentropy',
-        metrics=['accuracy']
-    )
-    model.summary()
-    plot_path = f'{FLAGS.model_dir}/{FLAGS.classes_name}_model.png'
-    plot_model(model, show_shapes=True, show_layer_names=True, to_file=plot_path)
-    return model
-
-
-def create_model2():
     if FLAGS.retrain:
         if FLAGS.trainable == 0:
             print('No trainable is set for retraining')
