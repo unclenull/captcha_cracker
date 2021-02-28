@@ -28,7 +28,7 @@ def parse_args(extra=None):
         action='store_true',
         help='including uppercase chars.')
     parser.add_argument(
-        '-w', '--size',
+        '-c', '--count',
         default=4,
         type=int,
         help='number of characters per image.')
@@ -92,7 +92,7 @@ def parse_args(extra=None):
         exit()
 
     FLAGS.classes = classes
-    FLAGS.classes_name = f'{FLAGS.size}_{name}'
+    FLAGS.classes_name = f'{FLAGS.count}_{name}'
     FLAGS.base_dataset_path = f'{FLAGS.base_dataset_dir}/{FLAGS.classes_name}'
     FLAGS.dataset_path = f'{FLAGS.dataset_dir}/{FLAGS.classes_name}'
     FLAGS.base_model_path = f'{FLAGS.base_model_dir}/{FLAGS.classes_name}_base.h5'
@@ -100,15 +100,21 @@ def parse_args(extra=None):
     return FLAGS, extra
 
 
-def parse_label(filename, classes):
-    real_num = filename[-8:-4]
+def parse_filename_label(filename, classes):
+    return parse_label(filename[-8:-4], classes)
+
+
+def parse_label(text, classes):
     y_list = []
-    for i in real_num:
+    for i in text:
         y_list.append(classes.index(i))
     return y_list
 
 
-def data_generator(images, batch_size, img_shape, letter_count, classes, no_first=False):
+def data_generator_from_fs(images, batch_size, img_shape, letter_count, classes, no_first=False):
+    total = len(images)
+    if total < batch_size:
+        batch_size = total
     if not no_first:
         # this first batch only returns shape
         yield np.zeros([batch_size] + list(img_shape)), [np.zeros(batch_size)] * letter_count
@@ -119,7 +125,7 @@ def data_generator(images, batch_size, img_shape, letter_count, classes, no_firs
         x, y = [], []
         for img in images:
             x.append(cv2.imread(img))
-            y.append(parse_label(img, classes))
+            y.append(parse_filename_label(img, classes))
             if len(x) >= batch_size:
                 try:
                     x = preprocess_input(np.array(x).astype(float))
@@ -140,7 +146,35 @@ def data_generator(images, batch_size, img_shape, letter_count, classes, no_firs
                 y = [y[:, i] for i in range(letter_count)]
             else:  # array will trigger error
                 y = y[:, 0]
-            yield x, y
+            yield np.array(x), y
+
+
+def data_generator_from_gen(Generator, batch_size, img_shape, letter_count, classes, no_first=False):
+    if not no_first:
+        # this first batch only returns shape
+        yield np.zeros([batch_size] + list(img_shape)), [np.zeros(batch_size)] * letter_count
+
+    gen = Generator(img_shape, letter_count, classes).generate
+
+    while True:
+        # epoch begins
+        x, y = [], []
+        for _ in range(batch_size):
+            img, text = gen()
+            x.append(img)
+            y.append(parse_label(text, classes))
+
+        try:
+            x = preprocess_input(np.array(x).astype(float))
+        except Exception:
+            import pdb
+            pdb.set_trace()
+        y = np.array(y)
+        if letter_count > 1:
+            y = [y[:, i] for i in range(letter_count)]
+        else:  # array will trigger error
+            y = y[:, 0]
+        yield x, y
 
 
 def show_metrics(history, char_count, save_path):
