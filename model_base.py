@@ -8,7 +8,7 @@ from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from tensorflow.keras.models import load_model
 from tensorflow.keras.utils import plot_model
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.layers import Input, Dense, Dropout
+from tensorflow.keras.layers import Input, Dense, Dropout, Conv2D, MaxPooling2D, Flatten, BatchNormalization
 from tensorflow.keras.applications.xception import Xception
 from tensorflow.keras.models import Model
 from utils import parse_args, data_generator_from_fs, data_generator_from_gen, show_metrics, show_test
@@ -20,25 +20,59 @@ def _gen_data(gen, images, img_shape, no_first=False):
         img_shape=img_shape,
         no_first=no_first,
         batch_size=FLAGS.batch_size,
-        letter_count=FLAGS.count,
+        letter_count=FLAGS.length,
         classes=FLAGS.classes,
     )
 
 
 def create_model(img_shape):
-    base_model = Xception(
-        input_tensor=Input(shape=img_shape),
-        weights=None,
-        include_top=False,
-        pooling='avg'
-    )
-    # import pdb; pdb.set_trace()
-    x = base_model.output
+    # Alex
+    input_tensor = Input(shape=img_shape)
+
+    # 1st Fully Connected Layer
+    x = Conv2D(32, 3, activation='relu')(input_tensor)
+    x = BatchNormalization()(x)
+    x = MaxPooling2D((2, 2))(x)
+
+    # 2nd Fully Connected Layer
+    x = Conv2D(64, 3, activation='relu')(x)
+    x = BatchNormalization()(x)
+    x = MaxPooling2D((2, 2))(x)
+
+    # 3rd Fully Connected Layer
+    x = Conv2D(64, 3, activation='relu')(x)
+    x = BatchNormalization()(x)
+
+    # 4th Fully Connected Layer
+    x = Conv2D(64, 3, activation='relu')(x)
+    x = BatchNormalization()(x)
+
+    # 5th Fully Connected Layer
+    x = Conv2D(128, 3, activation='relu')(x)
+    x = BatchNormalization()(x)
+    x = MaxPooling2D((2, 2))(x)
+
+    # Passing it to a Fully Connected layer
+    x = Flatten()(x)
+
+    # 1st Fully Connected Layer
+    x = Dense(1024, activation='relu')(x)
+    x = BatchNormalization()(x)
     x = Dropout(0.5)(x)
 
-    predicts = [Dense(len(FLAGS.classes), name=f'c{i}', activation='softmax')(x) for i in range(FLAGS.count)]
+    # 2nd Fully Connected Layer
+    x = Dense(1024, activation='relu')(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.5)(x)
 
-    model = Model(inputs=base_model.input, outputs=predicts)
+    # 3rd Fully Connected Layer
+    x = Dense(1024, activation='relu')(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.5)(x)
+
+    predicts = [Dense(len(FLAGS.classes), name=f'c{i}', activation='softmax')(x) for i in range(FLAGS.length)]
+
+    model = Model(inputs=input_tensor, outputs=predicts)
 
     model.compile(
         optimizer=Adam(),
@@ -54,7 +88,8 @@ def create_model(img_shape):
 def train():
     if os.path.isdir(FLAGS.base_dataset_dir):
         train_samples = glob.glob(f'{FLAGS.base_dataset_path}/train/*')
-        img_shape = cv2.imread(train_samples[0]).shape
+        img_shape = cv2.imread(train_samples[0], cv2.IMREAD_GRAYSCALE).shape
+        img_shape = np.expand_dims(img_shape, -1)
         train_gen = _gen_data(data_generator_from_fs, train_samples, img_shape)
         steps_train = ceil(len(train_samples) / FLAGS.batch_size)
 
@@ -64,7 +99,7 @@ def train():
     elif os.path.isfile(f'{FLAGS.base_dataset_dir}.py'):
         sys.path.insert(0, os.getcwd())
         gen = __import__(f'{FLAGS.base_dataset_dir}').Generator
-        img_shape = FLAGS.height, FLAGS.width, 3
+        img_shape = FLAGS.height, FLAGS.width, 1
         train_gen = _gen_data(data_generator_from_gen, gen, img_shape)
         test_gen = _gen_data(data_generator_from_gen, gen, img_shape)
         steps_train = FLAGS.samples // FLAGS.batch_size
@@ -102,7 +137,7 @@ def train():
     )
 
     print('Training done.')
-    show_metrics(history, FLAGS.count, f"{FLAGS.base_model_dir}/{FLAGS.classes_name}_metrics_base.png")
+    show_metrics(history, FLAGS.length, f"{FLAGS.base_model_dir}/{FLAGS.classes_name}_metrics_base.png")
 
     # re-save a light-weight model
     model = create_model(img_shape)
@@ -116,11 +151,12 @@ def test():
         test_samples = glob.glob(f'{FLAGS.base_dataset_path}/test/*')
         steps = ceil(len(test_samples) / FLAGS.batch_size)
         img_shape = cv2.imread(test_samples[0]).shape
+        img_shape = np.expand_dims(img_shape, -1)
         gen = _gen_data(data_generator_from_fs, test_samples, img_shape)
     elif os.path.isfile(f'{FLAGS.base_dataset_dir}.py'):
         sys.path.insert(0, os.getcwd())
         gen = __import__(f'{FLAGS.base_dataset_dir}').Generator
-        img_shape = FLAGS.height, FLAGS.width, 3
+        img_shape = FLAGS.height, FLAGS.width, 1
         gen = _gen_data(data_generator_from_gen, gen, img_shape)
         steps = FLAGS.samples // FLAGS.batch_size * FLAGS.test_ratio
     else:

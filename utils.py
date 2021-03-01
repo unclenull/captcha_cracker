@@ -2,7 +2,6 @@ import numpy as np
 from math import ceil
 import argparse
 import string
-from tensorflow.keras.applications.xception import preprocess_input
 import matplotlib.pyplot as plt
 import pandas as pd
 import cv2
@@ -28,7 +27,7 @@ def parse_args(extra=None):
         action='store_true',
         help='including uppercase chars.')
     parser.add_argument(
-        '-c', '--count',
+        '-L', '--length',
         default=4,
         type=int,
         help='number of characters per image.')
@@ -92,7 +91,7 @@ def parse_args(extra=None):
         exit()
 
     FLAGS.classes = classes
-    FLAGS.classes_name = f'{FLAGS.count}_{name}'
+    FLAGS.classes_name = f'{FLAGS.length}_{name}'
     FLAGS.base_dataset_path = f'{FLAGS.base_dataset_dir}/{FLAGS.classes_name}'
     FLAGS.dataset_path = f'{FLAGS.dataset_dir}/{FLAGS.classes_name}'
     FLAGS.base_model_path = f'{FLAGS.base_model_dir}/{FLAGS.classes_name}_base.h5'
@@ -124,14 +123,11 @@ def data_generator_from_fs(images, batch_size, img_shape, letter_count, classes,
         np.random.shuffle(images)
         x, y = [], []
         for img in images:
-            x.append(cv2.imread(img))
+            x.append(cv2.imread(img, cv2.IMREAD_GRAYSCALE))
             y.append(parse_filename_label(img, classes))
             if len(x) >= batch_size:
-                try:
-                    x = preprocess_input(np.array(x).astype(float))
-                except Exception:
-                    import pdb
-                    pdb.set_trace()
+                x = np.array(x) / 255
+                x = np.expand_dims(x, -1)
                 y = np.array(y)
                 if letter_count > 1:
                     y = [y[:, i] for i in range(letter_count)]
@@ -164,11 +160,8 @@ def data_generator_from_gen(Generator, batch_size, img_shape, letter_count, clas
             x.append(img)
             y.append(parse_label(text, classes))
 
-        try:
-            x = preprocess_input(np.array(x).astype(float))
-        except Exception:
-            import pdb
-            pdb.set_trace()
+        x = np.array(x) / 255
+        x = np.expand_dims(x, -1)
         y = np.array(y)
         if letter_count > 1:
             y = [y[:, i] for i in range(letter_count)]
@@ -232,7 +225,7 @@ def show_test(images_test, labels_true, labels_pred, classes):
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(5, 5 * 3))
     for i, f in enumerate(plots):
         ax = axes.flat[i]
-        ax.imshow(f[0])
+        ax.imshow(f[0], cmap='gray')
         ax.set_xlabel('{}({})'.format(get_label_string(f[1], classes), get_label_string(f[2], classes)))
         if not f[3]:
             ax.xaxis.label.set_color('red')

@@ -41,7 +41,7 @@ def _get_gen(folder, files, target_size, augment_args):
     df['filename'] = files
     labels = np.array([parse_label(img, FLAGS.classes) for img in files])
     y_col = []
-    for i in range(FLAGS.size):
+    for i in range(FLAGS.length):
         clm = f'class{i}'
         y_col.append(clm)
         df[clm] = labels[:, i]
@@ -92,11 +92,11 @@ def create_model():
     else:
         model = load_model(FLAGS.base_model_path)
         if FLAGS.new:
-            x = model.layers[- 1 - FLAGS.size].output
+            x = model.layers[- 1 - FLAGS.length].output
             x = Flatten(name="flatten")(x)
             x = Dense(256, activation="relu")(x)
             x = Dropout(0.2, name='dropout_refining')(x)
-            predicts = [Dense(len(FLAGS.classes), name=f'c{i}', activation='softmax')(x) for i in range(FLAGS.size)]
+            predicts = [Dense(len(FLAGS.classes), name=f'c{i}', activation='softmax')(x) for i in range(FLAGS.length)]
             model = Model(inputs=model.input, outputs=predicts)
 
             FLAGS.trainable = 0  # warm up
@@ -105,7 +105,7 @@ def create_model():
     if FLAGS.trainable > 0:
         endIndex = ceil(layers_count * (1 - FLAGS.trainable))
     else:  # only the classifiers
-        endIndex = layers_count - FLAGS.size
+        endIndex = layers_count - FLAGS.length
     print(f'Trainable layers count: {layers_count - endIndex}')
 
     for layer in model.layers[:endIndex]:
@@ -164,7 +164,7 @@ def train():
     )
 
     print('Training done.')
-    show_metrics(history, FLAGS.size, f"{FLAGS.model_dir}/{FLAGS.classes_name}_metrics.png")
+    show_metrics(history, FLAGS.length, f"{FLAGS.model_dir}/{FLAGS.classes_name}_metrics.png")
 
 
 def test():
