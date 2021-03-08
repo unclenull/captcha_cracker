@@ -12,6 +12,11 @@ from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.layers import BatchNormalization, Flatten, Dense, Dropout
 from utils import parse_args, parse_label, show_metrics, show_test
 
+"""
+Transfer model trained on synthesized dataset to real labeled dataset.
+This was NOT successful.
+"""
+
 
 def _create_generator(augment_args=None, preprocess=True):
     if augment_args is False:
@@ -69,7 +74,7 @@ def _get_shape(folder):
 
 def show_aug():
     folder = f'{FLAGS.dataset_path}/'
-    folder_target = 'aug_showcase'
+    folder_target = 'showcase_aug'
     if not os.path.exists(folder_target):
         os.mkdir(folder_target)
 

@@ -1,3 +1,6 @@
+import imp
+import glob
+import os
 import numpy as np
 from math import ceil
 import argparse
@@ -7,12 +10,10 @@ import pandas as pd
 import cv2
 
 DIR_DATASET = 'dataset'
-DIR_DATASET_BASE = 'dataset_base'
 DIR_MODELS = 'model'
-DIR_MODELS_BASE = 'model_base'
 
 
-def parse_args(extra=None):
+def parse_args(extra=None, args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '-d', '--digit',
@@ -27,6 +28,10 @@ def parse_args(extra=None):
         action='store_true',
         help='including uppercase chars.')
     parser.add_argument(
+        '-c', '--classes',
+        type=str,
+        help='specify explicit chars')
+    parser.add_argument(
         '-L', '--length',
         default=4,
         type=int,
@@ -37,33 +42,30 @@ def parse_args(extra=None):
         type=int,
         help='batch size for all operations')
     parser.add_argument(
-        '--base_dataset_dir',
-        default=DIR_DATASET_BASE,
-        type=str,
-        help='where the fake captchas are saved.')
-    parser.add_argument(
         '--dataset_dir',
         default=DIR_DATASET,
         type=str,
-        help='where the real captchas are saved.')
+        help='where the real captchas are stored.')
     parser.add_argument(
         '--model_dir',
         default=DIR_MODELS,
         type=str,
-        help='where the model for real is saved.')
+        help='where the trained model is to be saved.')
     parser.add_argument(
-        '--base_model_dir',
-        default=DIR_MODELS_BASE,
+        '--gen', '--generator',
         type=str,
-        help='where the model for synthetic is saved.')
+        help='custom generator path')
+    parser.add_argument(
+        '--g-c', '--gen-conf',
+        type=str,
+        help='config file path for the builtin generator')
 
     if extra is not None:
         for arg in extra:
             parser.add_argument(*arg[0], **arg[1] if len(arg) > 1 else {})
 
-    FLAGS, unparsed = parser.parse_known_args()
+    FLAGS, unparsed = parser.parse_known_args(args)
 
-    # import pdb; pdb.set_trace()
     len_extra = len(unparsed)
     if len_extra > 0:
         extra = {}
@@ -74,33 +76,36 @@ def parse_args(extra=None):
     else:
         extra = None
 
-    classes = ''
+    # import pdb; pdb.set_trace()
+    classes = FLAGS.classes or ''
     name = ''
-    if FLAGS.digit:
-        classes += string.digits
-        name += 'd'
-    if FLAGS.upper:
-        classes += string.ascii_uppercase
-        name += 'u'
-    if FLAGS.lower:
-        classes += string.ascii_lowercase
-        name += 'l'
+    if not classes:
+        if FLAGS.digit:
+            classes += string.digits
+            name += 'd'
+        if FLAGS.upper:
+            classes += string.ascii_uppercase
+            name += 'u'
+        if FLAGS.lower:
+            classes += string.ascii_lowercase
+            name += 'l'
 
     if len(classes) == 0:
         print('No char space set')
         exit()
 
     FLAGS.classes = classes
-    FLAGS.classes_name = f'{FLAGS.length}_{name}'
-    FLAGS.base_dataset_path = f'{FLAGS.base_dataset_dir}/{FLAGS.classes_name}'
+    FLAGS.classes_name = f'{FLAGS.length}_{classes}'
     FLAGS.dataset_path = f'{FLAGS.dataset_dir}/{FLAGS.classes_name}'
-    FLAGS.base_model_path = f'{FLAGS.base_model_dir}/{FLAGS.classes_name}_base.h5'
     FLAGS.model_path = f'{FLAGS.model_dir}/{FLAGS.classes_name}.h5'
     return FLAGS, extra
 
 
-def parse_filename_label(filename, classes):
-    return parse_label(filename[-8:-4], classes)
+def parse_filename_label(filename, length, classes):
+    """
+    xxxxx_label.png
+    """
+    return parse_label(filename[-4 - length:-4], classes)
 
 
 def parse_label(text, classes):
@@ -110,13 +115,23 @@ def parse_label(text, classes):
     return y_list
 
 
-def data_generator_from_fs(images, batch_size, img_shape, letter_count, classes, no_first=False):
+def normalize(images):
+    """
+    (-1, 1) * 0.98
+    """
+    images *= 0.98 / 127.5
+    images -= 1
+    images = np.expand_dims(images, -1)
+    return images
+
+
+def data_generator_from_fs(images, batch_size, img_shape, length, classes, no_first=False):
     total = len(images)
     if total < batch_size:
         batch_size = total
     if not no_first:
         # this first batch only returns shape
-        yield np.zeros([batch_size] + list(img_shape)), [np.zeros(batch_size)] * letter_count
+        yield np.zeros([batch_size] + list(img_shape)), [np.zeros(batch_size)] * length
 
     while True:
         # epoch begins
@@ -124,13 +139,12 @@ def data_generator_from_fs(images, batch_size, img_shape, letter_count, classes,
         x, y = [], []
         for img in images:
             x.append(cv2.imread(img, cv2.IMREAD_GRAYSCALE))
-            y.append(parse_filename_label(img, classes))
+            y.append(parse_filename_label(img, length, classes))
             if len(x) >= batch_size:
-                x = np.array(x) / 255
-                x = np.expand_dims(x, -1)
+                x = normalize(x)
                 y = np.array(y)
-                if letter_count > 1:
-                    y = [y[:, i] for i in range(letter_count)]
+                if length > 1:
+                    y = [y[:, i] for i in range(length)]
                 else:  # array will trigger error
                     y = y[:, 0]
                 yield x, y
@@ -138,19 +152,17 @@ def data_generator_from_fs(images, batch_size, img_shape, letter_count, classes,
         # epoch ends
         if len(x) > 0:  # the last batch doesn't have enough
             y = np.array(y)
-            if letter_count > 1:
-                y = [y[:, i] for i in range(letter_count)]
+            if length > 1:
+                y = [y[:, i] for i in range(length)]
             else:  # array will trigger error
                 y = y[:, 0]
             yield np.array(x), y
 
 
-def data_generator_from_gen(Generator, batch_size, img_shape, letter_count, classes, no_first=False):
+def data_generator_from_syn(gen, batch_size, img_shape, length, classes, no_first=False):
     if not no_first:
         # this first batch only returns shape
-        yield np.zeros([batch_size] + list(img_shape)), [np.zeros(batch_size)] * letter_count
-
-    gen = Generator(img_shape, letter_count, classes).generate
+        yield np.zeros([batch_size] + list(img_shape)), [np.zeros(batch_size)] * length
 
     while True:
         # epoch begins
@@ -160,25 +172,69 @@ def data_generator_from_gen(Generator, batch_size, img_shape, letter_count, clas
             x.append(img)
             y.append(parse_label(text, classes))
 
-        x = np.array(x) / 255
-        x = np.expand_dims(x, -1)
+        x = normalize(x)
         y = np.array(y)
-        if letter_count > 1:
-            y = [y[:, i] for i in range(letter_count)]
+        if length > 1:
+            y = [y[:, i] for i in range(length)]
         else:  # array will trigger error
             y = y[:, 0]
         yield x, y
 
 
-def show_metrics(history, char_count, save_path):
+def create_generator(FLAGS, both=False, no_first=False):
+    if callable(FLAGS.gen):
+        return FLAGS.gen()
+    elif os.path.isfile(FLAGS.gen):
+        image_syn = imp.load_source('custom.generator', FLAGS.gen)
+        img_shape = (FLAGS.height, FLAGS.width, 1)
+        image_syn = image_syn(img_shape, FLAGS.length, FLAGS.classes).generate
+    elif os.path.isfile(FLAGS.get_conf):
+        image_syn, img_shape = get_builtin_image_gen()
+
+    if image_syn is not None:
+        gen = data_generator_from_syn(image_syn, FLAGS.batch_size, img_shape, FLAGS.length, FLAGS.classes, FLAGS.no_first)
+        gen.img_shape = img_shape
+        gen.count = FLAGS.samples
+        if both:
+            gen2 = data_generator_from_syn(image_syn, FLAGS.batch_size, (
+                FLAGS.height, FLAGS.width, 1), FLAGS.length, FLAGS.classes, FLAGS.no_first)
+            gen2.img_shape = img_shape
+            gen2.count = FLAGS.samples
+            gen = (gen, gen2)
+    elif os.path.isdir(FLAGS.dataset_dir):
+        samples = glob.glob(f'{FLAGS.dataset_path}/test/*')
+        img_shape = cv2.imread(samples[0], cv2.IMREAD_GRAYSCALE).shape
+        img_shape = list(img_shape)
+        img_shape.append(1)
+        gen = data_generator_from_fs(samples, FLAGS.batch_size, img_shape, FLAGS.length, FLAGS.classes, FLAGS.no_first)
+        gen.img_shape = img_shape
+        gen.count = len(samples)
+
+        if both:
+            samples = glob.glob(f'{FLAGS.dataset_path}/train/*')
+            gen2 = data_generator_from_fs(samples, FLAGS.batch_size, img_shape, FLAGS.length, FLAGS.classes, FLAGS.no_first)
+            gen2.count = len(samples)
+            gen2.img_shape = img_shape
+            gen = (gen2, gen)
+    else:
+        return None
+
+    return gen
+
+
+def get_builtin_image_gen():
+    pass
+
+
+def show_metrics(history, length, save_path):
     fig, axes = plt.subplots(1, 2, figsize=(20, 5))
     epochs = len(history.history['loss'])
     history = pd.DataFrame(history.history)
 
     loss_fields = ['loss', 'val_loss']
-    if char_count > 1:
+    if length > 1:
         accuracy_fields = []
-        for i in range(char_count):
+        for i in range(length):
             accuracy_fields.append(f'c{i}_accuracy')
             accuracy_fields.append(f'val_c{i}_accuracy')
             loss_fields.append(f'c{i}_loss')

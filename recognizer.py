@@ -1,28 +1,17 @@
+"""
+Recongize captchas (from filesystem or generator) via AlexNet
+"""
+
 import os
-import sys
 import numpy as np
-import glob
-import cv2
 from math import ceil
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from tensorflow.keras.models import load_model
 from tensorflow.keras.utils import plot_model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.layers import Input, Dense, Dropout, Conv2D, MaxPooling2D, Flatten, BatchNormalization
-from tensorflow.keras.applications.xception import Xception
 from tensorflow.keras.models import Model
-from utils import parse_args, data_generator_from_fs, data_generator_from_gen, show_metrics, show_test
-
-
-def _gen_data(gen, images, img_shape, no_first=False):
-    return gen(
-        images,
-        img_shape=img_shape,
-        no_first=no_first,
-        batch_size=FLAGS.batch_size,
-        letter_count=FLAGS.length,
-        classes=FLAGS.classes,
-    )
+from utils import parse_args as base_parse_args, create_generator, show_metrics, show_test
 
 
 def create_model(img_shape):
@@ -80,40 +69,40 @@ def create_model(img_shape):
         metrics=['accuracy']
     )
     model.summary()
-    plot_path = f'{FLAGS.base_model_dir}/{FLAGS.classes_name}_model_base.png'
+    plot_path = f'{FLAGS.model_dir}/{FLAGS.classes_name}_model.png'
     plot_model(model, show_shapes=True, show_layer_names=True, to_file=plot_path)
     return model
 
 
-def train():
-    if os.path.isdir(FLAGS.base_dataset_dir):
-        train_samples = glob.glob(f'{FLAGS.base_dataset_path}/train/*')
-        img_shape = cv2.imread(train_samples[0], cv2.IMREAD_GRAYSCALE).shape
-        img_shape = np.expand_dims(img_shape, -1)
-        train_gen = _gen_data(data_generator_from_fs, train_samples, img_shape)
-        steps_train = ceil(len(train_samples) / FLAGS.batch_size)
+def _gen_data(both=False, no_first=False):
+    return create_generator(
+        FLAGS,
+        both,
+        no_first=no_first,
+    )
 
-        test_samples = glob.glob(f'{FLAGS.base_dataset_path}/test/*')
-        test_gen = _gen_data(data_generator_from_fs, test_samples, img_shape)
-        steps_test = ceil(len(test_samples) / FLAGS.batch_size),
-    elif os.path.isfile(f'{FLAGS.base_dataset_dir}.py'):
-        sys.path.insert(0, os.getcwd())
-        gen = __import__(f'{FLAGS.base_dataset_dir}').Generator
-        img_shape = FLAGS.height, FLAGS.width, 1
-        train_gen = _gen_data(data_generator_from_gen, gen, img_shape)
-        test_gen = _gen_data(data_generator_from_gen, gen, img_shape)
-        steps_train = FLAGS.samples // FLAGS.batch_size
-        steps_test = steps_train * FLAGS.test_ratio
-    else:
+
+def train(flags=None):
+    if flags is not None:
+        global FLAGS
+        FLAGS = flags
+
+    gens = _gen_data(True)
+    if gens is None:
         print('no dataset')
         exit()
+    else:
+        (train_gen, test_gen) = gens
+        img_shape = train_gen.img_shape
+        steps_train = ceil(train_gen.count / FLAGS.batch_size)
+        steps_test = ceil(test_gen.count / FLAGS.batch_size),
 
-    if not os.path.exists(FLAGS.base_model_dir):
-        os.mkdir(FLAGS.base_model_dir)
+    if not os.path.exists(FLAGS.model_dir):
+        os.makedirs(FLAGS.model_dir)
 
     callbacks = [
         ModelCheckpoint(
-            filepath=FLAGS.base_model_path,
+            filepath=FLAGS.model_path,
             monitor='val_loss',
             save_best_only=True,
             verbose=1
@@ -137,31 +126,22 @@ def train():
     )
 
     print('Training done.')
-    show_metrics(history, FLAGS.length, f"{FLAGS.base_model_dir}/{FLAGS.classes_name}_metrics_base.png")
+    show_metrics(history, FLAGS.length, f"{FLAGS.model_dir}/{FLAGS.classes_name}_metrics.png")
 
     # re-save a light-weight model
     model = create_model(img_shape)
-    model.load_weights(FLAGS.base_model_path)
-    model.save(FLAGS.base_model_path)
+    model.load_weights(FLAGS.model_path)
+    model.save(FLAGS.model_path)
 
 
 def test():
-    model = load_model(FLAGS.base_model_path)
-    if os.path.isdir(FLAGS.base_dataset_dir):
-        test_samples = glob.glob(f'{FLAGS.base_dataset_path}/test/*')
-        steps = ceil(len(test_samples) / FLAGS.batch_size)
-        img_shape = cv2.imread(test_samples[0]).shape
-        img_shape = np.expand_dims(img_shape, -1)
-        gen = _gen_data(data_generator_from_fs, test_samples, img_shape)
-    elif os.path.isfile(f'{FLAGS.base_dataset_dir}.py'):
-        sys.path.insert(0, os.getcwd())
-        gen = __import__(f'{FLAGS.base_dataset_dir}').Generator
-        img_shape = FLAGS.height, FLAGS.width, 1
-        gen = _gen_data(data_generator_from_gen, gen, img_shape)
-        steps = FLAGS.samples // FLAGS.batch_size * FLAGS.test_ratio
-    else:
+    model = load_model(FLAGS.model_path)
+    gen = _gen_data()
+    if gen is None:
         print('no dataset')
         exit()
+
+    steps = ceil(gen.count / FLAGS.batch_size)
 
     # evaluate all
     print('Evaluating')
@@ -180,8 +160,12 @@ def test():
     show_test(images_test, labels_true, labels_pred, FLAGS.classes)
 
 
-if __name__ == '__main__':
-    FLAGS, EXTRA = parse_args([
+def predict(image):
+    pass
+
+
+def parse_args(args=None):
+    return base_parse_args([
         (
             ('-w', '--width'),
             {
@@ -210,6 +194,7 @@ if __name__ == '__main__':
             {
                 'default': 50000,
                 'type': int,
+                'help': 'how many samples to generate',
             }
         ),
         (
@@ -221,6 +206,9 @@ if __name__ == '__main__':
             }
         ),
         (('cmd', ), {'help': 'train, test'}),
-    ])
+    ], args)
 
+
+if __name__ == '__main__':
+    FLAGS, EXTRA = parse_args()
     globals()[FLAGS.cmd]()

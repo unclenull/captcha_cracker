@@ -1,0 +1,82 @@
+def denoise_line(pixels, threshold=20):
+    (ROWS, COLS) = pixels.shape
+    Rows_hit = [None]*COLS
+    Col_start = 0
+    Preserved = []
+
+    def genLine(col):
+        if col < 1:
+            print('Invalid index: ', col)
+            exit()
+
+        hasMore = False
+        hit = False
+        lastPreserved = False
+
+        if col < COLS:
+            if pixels[Rows_hit[col-1]][col] == 1:
+                Rows_hit[col] = Rows_hit[col-1]
+                hasMore = True
+                hit, lastPreserved = genLine(col+1)
+                if hit:
+                    lastPreserved = removeDot(col, lastPreserved)
+            # ignore branches, they are chars at most cases
+            else:
+                if Rows_hit[col-1] > 0 and pixels[Rows_hit[col-1]-1][col] == 1:
+                    Rows_hit[col] = Rows_hit[col-1]-1
+                    hasMore = True
+                    hit, lastPreserved = genLine(col+1)
+                    if hit:
+                        lastPreserved = removeDot(col, lastPreserved)
+                if Rows_hit[col-1] < ROWS-1 \
+                        and pixels[Rows_hit[col-1]+1][col] == 1:
+                    Rows_hit[col] = Rows_hit[col-1]+1
+                    hasMore = True
+                    hit, lastPreserved = genLine(col+1)
+                    if hit:
+                        lastPreserved = removeDot(col, lastPreserved)
+
+        if not hasMore:
+            # if col - Col_start > threshold:
+            #     print(col - Col_start, '(', col, Col_start, ')' ':', Rows_hit[Col_start:col])
+            return (col - Col_start > threshold, lastPreserved)
+        return (hit, lastPreserved)
+
+    def removeDot(col, lastPreserved):
+        threshold_preserve = 5 + (1 if lastPreserved else 0)
+        row = Rows_hit[col]
+        sum = 0
+        offsets_row = []
+        for c in range(-1, 2):
+            if col + c >= COLS or col + c < 0:
+                continue
+
+            for r in range(-1, 2):
+                if row + r >= ROWS or row + r < 0:
+                    continue
+
+                pixel = pixels[row + r, col + c]
+                if pixel:
+                    sum += 1
+                    offsets_row.append(r)
+                if sum >= threshold_preserve:  # preserve (include itself)
+                    if (row, col) not in Preserved:
+                        Preserved.append((row, col))
+                    return True
+
+        if -1 in offsets_row and 1 in offsets_row:
+            # preserve if cross line exists
+            if (row, col) not in Preserved:
+                Preserved.append((row, col))
+            return True
+
+        pixels[row][col] = 0
+
+    for col in range(COLS):
+        Col_start = col
+        for row in range(ROWS):
+            if pixels[row][col] == 1 and (row, col) not in Preserved:
+                Rows_hit[col] = row
+                hit, lastPreserved = genLine(col+1)
+                if hit:
+                    removeDot(col, lastPreserved)
