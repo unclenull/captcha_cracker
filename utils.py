@@ -12,6 +12,16 @@ import cv2
 DIR_DATASET = 'dataset'
 DIR_MODELS = 'model'
 
+FOLDER_TMP_AUG = 'tmp/showcase_aug'
+
+
+def clear_folder(folder):
+    if os.path.exists(folder):
+        for f in os.listdir(folder):
+            os.remove(f'{folder}/{f}')
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+
 
 def parse_args(extra=None, args=None):
     parser = argparse.ArgumentParser()
@@ -264,8 +274,8 @@ def show_metrics(history, length, save_path):
     plt.show()
 
 
-def get_label_string(tensor, classes):
-    return ''.join(map(lambda ix: classes[ix], tensor))
+def get_label_string(tensors, classes):
+    return ''.join(map(lambda ix: classes[ix], tensors)) if isinstance(tensors, tuple) else classes[tensors]
 
 
 def show_test(images_test, labels_true, labels_pred, classes):

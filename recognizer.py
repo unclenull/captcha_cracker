@@ -11,6 +11,7 @@ from tensorflow.keras.utils import plot_model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.layers import Input, Dense, Dropout, Conv2D, MaxPooling2D, Flatten, BatchNormalization
 from tensorflow.keras.models import Model
+from tensorflow.keras.metrics import SparseCategoricalAccuracy
 from utils import parse_args as base_parse_args, create_generator, show_metrics, show_test
 
 
@@ -19,25 +20,25 @@ def create_model(img_shape):
     input_tensor = Input(shape=img_shape)
 
     # 1st Fully Connected Layer
-    x = Conv2D(32, 3, activation='relu')(input_tensor)
+    x = Conv2D(32, 3, activation='relu', padding='same')(input_tensor)
     x = BatchNormalization()(x)
     x = MaxPooling2D((2, 2))(x)
 
     # 2nd Fully Connected Layer
-    x = Conv2D(64, 3, activation='relu')(x)
+    x = Conv2D(64, 3, activation='relu', padding='same')(x)
     x = BatchNormalization()(x)
     x = MaxPooling2D((2, 2))(x)
 
     # 3rd Fully Connected Layer
-    x = Conv2D(64, 3, activation='relu')(x)
+    x = Conv2D(64, 3, activation='relu', padding='same')(x)
     x = BatchNormalization()(x)
 
     # 4th Fully Connected Layer
-    x = Conv2D(64, 3, activation='relu')(x)
+    x = Conv2D(64, 3, activation='relu', padding='same')(x)
     x = BatchNormalization()(x)
 
     # 5th Fully Connected Layer
-    x = Conv2D(128, 3, activation='relu')(x)
+    x = Conv2D(128, 3, activation='relu', padding='same')(x)
     x = BatchNormalization()(x)
     x = MaxPooling2D((2, 2))(x)
 
@@ -66,7 +67,7 @@ def create_model(img_shape):
     model.compile(
         optimizer=Adam(),
         loss='sparse_categorical_crossentropy',
-        metrics=['accuracy']
+        metrics=[SparseCategoricalAccuracy(name='acc')]
     )
     model.summary()
     plot_path = f'{FLAGS.model_dir}/{FLAGS.classes_name}_model.png'
@@ -95,7 +96,7 @@ def train(flags=None):
         (train_gen, test_gen) = gens
         img_shape = train_gen.img_shape
         steps_train = ceil(train_gen.count / FLAGS.batch_size)
-        steps_test = ceil(test_gen.count / FLAGS.batch_size),
+        steps_test = ceil(test_gen.count / FLAGS.batch_size)
 
     if not os.path.exists(FLAGS.model_dir):
         os.makedirs(FLAGS.model_dir)
@@ -116,6 +117,7 @@ def train(flags=None):
     ]
 
     model = create_model(img_shape)
+    # import pdb; pdb.set_trace()
     history = model.fit(
         train_gen,
         steps_per_epoch=steps_train,

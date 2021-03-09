@@ -10,7 +10,7 @@ from tensorflow.keras.utils import plot_model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.layers import BatchNormalization, Flatten, Dense, Dropout
-from utils import parse_args, parse_label, show_metrics, show_test
+from utils import parse_args, parse_label, show_metrics, show_test, clear_folder, FOLDER_TMP_AUG
 
 """
 Transfer model trained on synthesized dataset to real labeled dataset.
@@ -74,18 +74,17 @@ def _get_shape(folder):
 
 def show_aug():
     folder = f'{FLAGS.dataset_path}/'
-    folder_target = 'showcase_aug'
-    if not os.path.exists(folder_target):
-        os.mkdir(folder_target)
+
+    clear_folder(FOLDER_TMP_AUG)
 
     _create_generator(EXTRA if FLAGS.augment else False, False) \
         .flow_from_directory(
             folder,
-            save_to_dir=folder_target,
+            save_to_dir=FOLDER_TMP_AUG,
             target_size=_get_shape(f'{folder}/train')[:2]
         ).next()  # noqa
 
-    print(f'Sample augmented images are saved in {folder_target}')
+    print(f'Sample augmented images are saved in {FOLDER_TMP_AUG}')
 
 
 def create_model():
