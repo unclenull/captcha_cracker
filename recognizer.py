@@ -207,7 +207,7 @@ def parse_args(args=None):
                 'help': 'ratio of count of images for evaluating',
             }
         ),
-        (('cmd', ), {'help': 'train, test'}),
+        (('cmd', ), {'nargs': '?', 'help': 'train, test'}),
     ], args)
 
 

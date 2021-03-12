@@ -129,9 +129,10 @@ def normalize(images):
     """
     (-1, 1) * 0.98
     """
-    images *= 0.98 / 127.5
+    images = images * 0.98 / 127.5
     images -= 1
-    images = np.expand_dims(images, -1)
+    if images.shape[-1] != 1:
+        images = np.expand_dims(images, -1)
     return images
 
 
@@ -182,6 +183,7 @@ def data_generator_from_syn(gen, batch_size, img_shape, length, classes, no_firs
             x.append(img)
             y.append(parse_label(text, classes))
 
+        import pdb; pdb.set_trace()
         x = normalize(x)
         y = np.array(y)
         if length > 1:
@@ -245,12 +247,12 @@ def show_metrics(history, length, save_path):
     if length > 1:
         accuracy_fields = []
         for i in range(length):
-            accuracy_fields.append(f'c{i}_accuracy')
-            accuracy_fields.append(f'val_c{i}_accuracy')
+            accuracy_fields.append(f'c{i}_acc')
+            accuracy_fields.append(f'val_c{i}_acc')
             loss_fields.append(f'c{i}_loss')
             loss_fields.append(f'val_c{i}_loss')
     else:
-        accuracy_fields = ['accuracy', 'val_accuracy']
+        accuracy_fields = ['acc', 'val_acc']
 
     history[accuracy_fields].plot(
         ax=axes[0],
@@ -281,19 +283,26 @@ def get_label_string(tensors, classes):
 def show_test(images_test, labels_true, labels_pred, classes):
     plots = []
     for i, label in enumerate(labels_true):
-        plots.append((images_test[i], labels_pred[i], labels_true[i], np.array_equal(labels_pred[i], label)))
+        cap = '{}({})'.format(get_label_string(labels_pred[i], classes), get_label_string(labels_true[i], classes))
+        plots.append((images_test[i], cap, not np.array_equal(labels_pred[i], label)))
 
     if len(plots) == 0:
         return
+    plot_images(plots)
 
+
+def plot_images(plots):
+    """
+    plots: ((image, label, [isHighlight]), )
+    """
     n_cols = 8
     n_rows = ceil(len(plots) / n_cols)
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(5, 5 * 3))
     for i, f in enumerate(plots):
         ax = axes.flat[i]
         ax.imshow(f[0], cmap='gray')
-        ax.set_xlabel('{}({})'.format(get_label_string(f[1], classes), get_label_string(f[2], classes)))
-        if not f[3]:
+        ax.set_xlabel(f[1])
+        if len(f) > 2 and f[2]:
             ax.xaxis.label.set_color('red')
         ax.set_xticks([])
         ax.set_yticks([])

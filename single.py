@@ -11,14 +11,14 @@ from emnist import extract_training_samples
 from tensorflow.keras.models import load_model
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from utils import show_test, clear_folder, FOLDER_TMP_AUG
+from utils import show_test, clear_folder, normalize, FOLDER_TMP_AUG
 from recognizer import train as base_train, parse_args as base_parse_args
 
 
 MODEL_DIR = 'model/single'
 
 
-def parse_args():
+def parse_args(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '-d', '--digits',
@@ -35,9 +35,10 @@ def parse_args():
         help='batch size for all operations')
     parser.add_argument(
         'cmd',
-        help='train, test'
+        nargs='?',
+        help='train, test, show_aug, predict'
     )
-    FLAGS, unparsed = parser.parse_known_args()
+    FLAGS, unparsed = parser.parse_known_args(args)
     return (FLAGS, unparsed)
 
 
@@ -72,7 +73,7 @@ def show_aug():
     ).next()
 
 
-def get_dataset():
+def get_classes():
     if FLAGS.digits and FLAGS.letters:
         dataset = 'balanced'  # 47
         classes = string.digits + string.ascii_uppercase + string.ascii_lowercase.translate({ord(i): None for i in 'cijklmopsuvwxyz'})
@@ -86,19 +87,56 @@ def get_dataset():
         print('No data set specified')
         exit()
 
+    return dataset, classes
+
+
+def get_dataset():
+    dataset, classes = get_classes()
     images, labels = extract_training_samples(dataset)
-    images = np.expand_dims(images, -1)
+    images = normalize(images)
     return images, labels, dataset, classes
 
 
-def train():
+def train(*args, overrides=None):
+    if len(args) > 0:
+        global FLAGS
+        FLAGS, extra = parse_args(args)
     images, labels, dataset, classes = get_dataset()
+    if overrides is not None:  # {label: generator}
+        for label in overrides.keys():
+            gen = overrides[label]
+            label_index = classes.index(label)
+            indices = np.where(labels == label_index)[0]
+            if hasattr(gen, 'RATIO'):
+                indices = np.random.choice(indices, int(len(indices) * gen.RATIO))
+            sample_images = normalize(gen.next())
+            # import pdb; pdb.set_trace()
+            len_samples = sample_images.shape[0]
+            ix_sample = 0
+            print(f'CCCCCCCCCCCCCC:{len(indices)}')
+            for ix in indices:
+                if len_samples == ix_sample:
+                    sample_images = normalize(gen.next())
+                    len_samples = sample_images.shape[0]
+                    ix_sample = 0
+                images[ix] = sample_images[ix_sample]
+                ix_sample += 1
+
     (trainX, testX, trainY, testY) = train_test_split(images, labels, test_size=0.20, stratify=labels, random_state=42)
+    images = None
+    labels = None
+    # indices = np.where(testY == label_index)[0]
+    # plots = []
+    # for i in np.random.choice(indices, 40):
+    #     plots.append((testX[i], testY[i]))
+    # from utils import plot_images
+    # plot_images(plots)
+    # exit()
 
     gen_train = create_generator(trainX, trainY, FLAGS.batch_size)
     gen_test = create_generator(testX, testY, FLAGS.batch_size)
 
-    base_flags = base_parse_args(['-d', 'foo'])[0]
+    base_flags = base_parse_args(['-d'])[0]
     base_flags.gen = lambda: (gen_train, gen_test)
     base_flags.classes = classes
     base_flags.classes_name = dataset
@@ -124,11 +162,36 @@ def test():
 
     # show a batch
     images_test, labels_true = next(gen)
+    max_count = 40
 
-    labels_pred = model.predict_on_batch(images_test)
+    labels_pred = model.predict_on_batch(images_test[:max_count])
     labels_pred = np.array(labels_pred).argmax(axis=-1)
 
-    show_test(images_test, labels_true, labels_pred, classes)
+    show_test(images_test, labels_true[:max_count], labels_pred, classes)
+
+
+class Predictor():
+    def __init__(self, *args):
+        global FLAGS
+        FLAGS, extra = parse_args(args)
+        dataset, classes = get_classes()
+        self.classes = classes
+        if hasattr(extra, 'model_path'):
+            model_path = extra.model_path
+        else:
+            model_path = f'{MODEL_DIR}/{dataset}.h5'
+        self.model = load_model(model_path)
+        print('Make sure images are of BLACK background')
+
+    def next(self, images):
+        images = np.array(images)
+        if images.shape[-2:] != (28, 28):
+            print('The image shape should be (28, 28)')
+            exit()
+        images = normalize(images)
+        one_hots = self.model.predict(images)
+        indices = np.array(one_hots).argmax(axis=-1)
+        return ''.join(map(lambda ix: self.classes[ix], indices))
 
 
 if __name__ == '__main__':
