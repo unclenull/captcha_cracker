@@ -8,7 +8,7 @@ def _get_start_col_from_min_hist(pixels):
     rows, cols = pixels.shape
     mid = cols // 2
     offset = cols // 6
-    temp = 1-pixels[:rows//2, mid-offset:mid+offset]
+    temp = pixels[:rows//2, mid-offset:mid+offset]
     histogram_vert = list(np.sum(temp, 0))
     index = histogram_vert.index(min(histogram_vert))
 
@@ -16,10 +16,10 @@ def _get_start_col_from_min_hist(pixels):
     max_x_temp = temp.shape[1] - 1
 
     if (
-        temp[0, index]  # current black
-        and not pixels[0, start_x_temp + index-1]  # left black
-        and index < max_x_temp and temp[0, index+1]  # right black
-    ):  # move to the right most white if exists within temp
+        temp[0, index]  # current char
+        and pixels[0, start_x_temp + index-1]  # left char
+        and index < max_x_temp and temp[0, index+1]  # right char
+    ):  # move to the right background if exists within temp
         new_index = index + 2
         while (new_index < max_x_temp):
             if not temp[0, new_index]:
@@ -33,9 +33,9 @@ def _get_start_col_from_min_hist(pixels):
 def _get_weight_index(index, cur_p):
     row, col = cur_p
     return [
-            None, (row+1, col-1), (row+1, col),
-            (row+1, col+1), (row, col+1), (row, col-1)
-           ][index]
+        None, (row+1, col-1), (row+1, col),
+        (row+1, col+1), (row, col+1), (row, col-1)
+    ][index]
 
 
 def _get_end_route(pixels, start_col):
@@ -58,7 +58,7 @@ def _get_end_route(pixels, start_col):
                 continue
             if (i == 3 or i == 4) and cur_col == right_limit:
                 continue
-            cur_w = pixels[_get_weight_index(i, cur_p)]//255 * (6-i)
+            cur_w = (1 - pixels[_get_weight_index(i, cur_p)]//255) * (6-i)
             sum_w += cur_w
             if max_w < cur_w:
                 max_w = cur_w
@@ -80,16 +80,16 @@ def _get_end_route(pixels, start_col):
             next_col = cur_col
             next_row = cur_row + 1
         elif max_w == 5:
-            if cur_col < right_limit and pixels[cur_row+1, cur_col+1]:
-                # No.3 is white
-                # pick the nearest to black
+            if cur_col < right_limit and not pixels[cur_row+1, cur_col+1]:
+                # No.3 is black
+                # pick the nearest to char
                 count = 2
                 while cur_col-count > 0 and cur_col+count < right_limit:
                     if not pixels[cur_row+1, cur_col-count]:
                         next_col = cur_col - 1
                         next_row = cur_row + 1
                         break
-                    elif not pixels[cur_row+1, cur_col+count]:
+                    elif pixels[cur_row+1, cur_col+count]:
                         next_col = cur_col + 1
                         next_row = cur_row + 1
                         break
@@ -145,8 +145,16 @@ def _get_end_route(pixels, start_col):
     return end_route
 
 
+def _show_split(pixels, end_route):
+    img = Image.fromarray(pixels).convert('RGB')
+    img = np.array(img)
+    for i in end_route:
+        img[tuple(i)] = [255, 0, 0]
+    Image.fromarray(img).show()
+
+
 # half split
-# pixels: numpy.array[int(0, 255)], binary image pixels with white background
+# pixels: numpy.array[int(0, 255)], binary image pixels with black background
 def split_dropfall(pixels):
     # Image.fromarray(pixels).show()
     # exit()
@@ -155,28 +163,22 @@ def split_dropfall(pixels):
 
     end_route = _get_end_route(pixels, start_col)
 
-    # img = Image.fromarray(pixels).convert('RGB')
-    # img = np.array(img)
-    # for i in end_route:
-    #     img[tuple(i)] = [255, 0, 0]
-    # Image.fromarray(img).show()
-    # #Image.fromarray(img).save('mark.png')
-    # # exit()
+    # import pdb; pdb.set_trace()
+    _show_split(pixels, end_route)
 
-    end_route = [max(list(points)) for _, points in groupby(end_route, lambda x:x[0])]  # remove duplicate rows
-
-    # find the widest black
+    end_route = [max(list(points)) for _, points in groupby(
+        end_route, lambda x:x[0])]  # remove duplicate rows
 
     col_max = 0
     shortened_cols = []
     for dot in end_route:
-        if pixels[dot]:  # shrink to black when white
-            while dot[1] > col_max and pixels[dot]:
+        if not pixels[dot]:  # move left to char when background
+            while dot[1] > col_max and not pixels[dot]:
                 dot = (dot[0], dot[1]-1)
         col_max = max(col_max, dot[1])
         shortened_cols.append(dot[1])
 
-    img1 = np.full((rows, col_max+1), 255, dtype='uint8')
+    img1 = np.full((rows, col_max+1), 0, dtype='uint8')
     for r in range(rows):
         c = shortened_cols[r]
         img1[r, 0:c+1] = pixels[r, 0:c+1]
@@ -186,8 +188,8 @@ def split_dropfall(pixels):
     expanded_cols = []
     col_min = cols - 1
     for dot in end_route:
-        if pixels[dot]:  # expand to black when white
-            while dot[1] < col_min and pixels[dot]:
+        if not pixels[dot]:  # move right to char when background
+            while dot[1] < col_min and not pixels[dot]:
                 dot = (dot[0], dot[1]+1)
         else:  # move to the next col
             dot = (dot[0], min(dot[1]+1, cols - 1))
@@ -195,7 +197,7 @@ def split_dropfall(pixels):
         expanded_cols.append(dot[1])
 
     width = cols - col_min
-    img2 = np.full((rows, width), 255, dtype='uint8')
+    img2 = np.full((rows, width), 0, dtype='uint8')
     for r in range(rows):
         c = expanded_cols[r]
         img2[r, c-col_min:] = pixels[r, c:]

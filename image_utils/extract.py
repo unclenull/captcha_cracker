@@ -1,4 +1,3 @@
-from PIL import Image
 import traceback
 import numpy as np
 import cv2
@@ -6,11 +5,15 @@ from math import ceil
 from .split import split_dropfall
 
 
-# pixels: numpy.array[int(0,255)], binary image pixels
+# pixels: numpy.array[int(0, 255)], binary image pixels with black background
+#   0/1 cannot be saved as image
 # count: int, number of chars to extract
 # splitRecursive: bool
+# return: [numpy.array(int(0, 255))], list of binary image pixels with black background
+from PIL import Image
 def extract(pixels, count, splitRecursive=False):
     # Image.fromarray(pixels).show()
+    # import pdb; pdb.set_trace()
     rows, cols = pixels.shape
     maskFull = np.zeros(np.array(pixels.shape) + np.array([2, 2]), dtype='uint8')
     widthMax = cols // count
@@ -45,14 +48,14 @@ def extract(pixels, count, splitRecursive=False):
 
     for r in range(rows):
         for c in range(cols):
-            if not pixels[r, c] and not maskFull[r+1, c+1]:
+            if pixels[r, c] and not maskFull[r+1, c+1]:
                 mask = np.zeros(np.array(pixels.shape) + np.array([2, 2]), dtype='uint8')
                 rect = cv2.floodFill(
                     pixels, mask, (c, r), None,
-                    flags=4 | 255 << 8 | cv2.FLOODFILL_MASK_ONLY)[3]
+                    flags=8 | 255 << 8 | cv2.FLOODFILL_MASK_ONLY)[3]
                 x, y, w, h = rect
                 # Image.fromarray(mask).show()
-                fills.append((rect, np.invert(mask[y+1:y+1+h, x+1:x+1+w])))  # turn to white background
+                fills.append((rect, mask[y+1:y+1+h, x+1:x+1+w]))  # black background
                 maskFull[mask == 255] = True
 
     out = []
@@ -79,13 +82,13 @@ def extract(pixels, count, splitRecursive=False):
     return list(map(lambda e: e[1], out))
 
 
-# pixels: numpy.array[int(0,255)], binary image pixels
+# pixels: numpy.array[int(0, 255)], binary image pixels with black background
 # count: int, number of chars to extract
 # length: target char square length, if None returned unwrapped
 # splitRecursive: bool
 # noRotate: bool, don't rotate char upright
-# return numpy.array[int(0,255)]
-def extract_wrapped(pixels, count, length=16, splitRecursive=False, noRotate=False):
+# return: [numpy.array(int(0, 255))], list of binary image pixels with black background as emnist
+def extract_wrapped(pixels, count, length=28, splitRecursive=False, noRotate=False):
     if length is None:
         length = pixels.shape[0]
 
@@ -93,10 +96,10 @@ def extract_wrapped(pixels, count, length=16, splitRecursive=False, noRotate=Fal
         h, w = img.shape
         if not noRotate:
             contour = cv2.findContours(
-                    np.invert(img),  # work on non-zero uint8 foreground
-                    cv2.RETR_EXTERNAL,
-                    cv2.CHAIN_APPROX_SIMPLE
-                )[0][0]
+                img,
+                cv2.RETR_EXTERNAL,
+                cv2.CHAIN_APPROX_SIMPLE
+            )[0][0]
             rect = cv2.minAreaRect(contour)
             center, size, angle = rect
 
@@ -126,10 +129,10 @@ def extract_wrapped(pixels, count, length=16, splitRecursive=False, noRotate=Fal
                     dtype="float32")
 
                 M = cv2.getPerspectiveTransform(src_pts, dst_pts)
-                img = cv2.warpPerspective(img, M, (w, h), flags=cv2.INTER_AREA, borderValue=255)
+                img = cv2.warpPerspective(img, M, (w, h), flags=cv2.INTER_AREA, borderValue=0)
                 # Image.fromarray(img).show()
 
-        char = np.full([length, length], 255, dtype='uint8')  # square
+        char = np.full([length, length], 0, dtype='uint8')  # square
         nw = nh = length
         if h > w:
             nw = w * length // h

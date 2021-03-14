@@ -15,7 +15,7 @@ from utils import show_test, clear_folder, normalize, FOLDER_TMP_AUG
 from recognizer import train as base_train, parse_args as base_parse_args
 
 
-MODEL_DIR = 'model/single'
+MODEL_DIR = 'model'
 
 
 def parse_args(args=None):
@@ -33,6 +33,9 @@ def parse_args(args=None):
         default=32,
         type=int,
         help='batch size for all operations')
+    parser.add_argument(
+        '-m', '--model_path',
+    )
     parser.add_argument(
         'cmd',
         nargs='?',
@@ -110,10 +113,8 @@ def train(*args, overrides=None):
             if hasattr(gen, 'RATIO'):
                 indices = np.random.choice(indices, int(len(indices) * gen.RATIO))
             sample_images = normalize(gen.next())
-            # import pdb; pdb.set_trace()
             len_samples = sample_images.shape[0]
             ix_sample = 0
-            print(f'CCCCCCCCCCCCCC:{len(indices)}')
             for ix in indices:
                 if len_samples == ix_sample:
                     sample_images = normalize(gen.next())
@@ -141,7 +142,7 @@ def train(*args, overrides=None):
     base_flags.classes = classes
     base_flags.classes_name = dataset
     base_flags.model_dir = MODEL_DIR
-    base_flags.model_path = f'{base_flags.model_dir}/{base_flags.classes_name}.h5'
+    base_flags.model_path = FLAGS.model_path or f'{MODEL_DIR}/{dataset}.h5'
     base_flags.length = 1
     base_flags.batch_size = FLAGS.batch_size
 
@@ -176,10 +177,7 @@ class Predictor():
         FLAGS, extra = parse_args(args)
         dataset, classes = get_classes()
         self.classes = classes
-        if hasattr(extra, 'model_path'):
-            model_path = extra.model_path
-        else:
-            model_path = f'{MODEL_DIR}/{dataset}.h5'
+        model_path = FLAGS.model_path or f'{MODEL_DIR}/{dataset}.h5'
         self.model = load_model(model_path)
         print('Make sure images are of BLACK background')
 
