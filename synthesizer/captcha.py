@@ -2,8 +2,8 @@ import os
 import string
 import random
 from cached_property import cached_property
-from comp import Draw, Image, ImageFilter, getrgb, truetype
-from image import (
+from .comp import Draw, Image, ImageFilter, getrgb, truetype
+from .image import (
     background,
     curve,
     noise,
@@ -29,7 +29,8 @@ class Captcha(object):
         extra_bg=None,  # other background processes
 
         lines=1,  # lines of text
-        char_set=string.digits,
+        charset_classes=None,  # 'dul'
+        charset=string.digits,
         length=4,
         fonts=['CourierNew-Bold'],
         font_sizes=[HEIGHT],
@@ -49,7 +50,13 @@ class Captcha(object):
         self.extra_bg = extra_bg  # other background processes
 
         self.lines = lines  # lines of text (TODO)
-        self.char_set = char_set
+        if self.charset_classes is not None:
+            if '0' in self.charset_classes:
+                self.charset = string.digits
+            if 'a' in self.charset_classes:
+                self.charset += string.ascii_uppercase
+            if 'A' in self.charset_classes:
+                self.charset += string.ascii_lowercase
         self.length = length
         self._fonts = fonts
         self.font_sizes = font_sizes
@@ -100,12 +107,21 @@ class Captcha(object):
         ]
         return _drawings
 
-    def generate(self, chars=None):
+    def get_one(self, chars=None, no_label=False):
         if chars is None:
-            chars = random.choices(self.char_set, k=self.length)
+            chars = random.choices(self.charset, k=self.length)
 
         image = Image.new("RGB", (self.width, self.height), self.background)
         for drawing in self.drawings:
             image = drawing(image, chars)
             assert image
-        return image
+        if no_label:
+            return image
+        else:
+            return image, chars
+
+    def get_batch(self, batch_size, chars=None, no_label=False):
+        arrs = []
+        for _ in range(batch_size):
+            arrs.append(self.get_one(chars, no_label=no_label))
+        return arrs

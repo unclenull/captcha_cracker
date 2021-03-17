@@ -94,7 +94,7 @@ def create_model():
             exit()
         model = load_model(FLAGS.model_path)
     else:
-        model = load_model(FLAGS.base_model_path)
+        model = load_model(FLAGS.base_model_path, compile=False)
         if FLAGS.new:
             x = model.layers[- 1 - FLAGS.length].output
             x = Flatten(name="flatten")(x)
@@ -142,9 +142,10 @@ def train():
 
     callbacks = [
         ModelCheckpoint(
-            filepath=FLAGS.model_path,
+            filepath=FLAGS.transferred_model_path,
             monitor='val_loss',
             save_best_only=True,
+            save_weights_only=True,
             verbose=1
         ),
         EarlyStopping(
