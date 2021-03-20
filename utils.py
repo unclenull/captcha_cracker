@@ -260,7 +260,7 @@ def get_refined_image_gen(FLAGS):
     refiner = load_model(FLAGS.refiner_forward_model_path, custom_objects=get_refiner_custom_objects())
 
     def new_gen():
-        img, txt = syn_gen()
+        img, txt = syn_gen.get_one()
         return refiner.predict_on_batch(normalize([img]))[0], txt
 
     return new_gen, img_shape
@@ -276,11 +276,11 @@ def get_synthesizer(FLAGS):
     elif os.path.isfile(FLAGS.syn):
         synthesizer = imp.load_source('custom.synthesizer', FLAGS.syn).default()
         img_shape = (synthesizer.height, synthesizer.width, 1)
-        return synthesizer.get_one, img_shape
+        return synthesizer, img_shape
     elif FLAGS.syn_conf is not None:
         conf = FLAGS.syn_conf
         captcha_gen = Captcha(**conf)
-        return captcha_gen.get_one, (conf.height, conf.width, 1)
+        return captcha_gen, (conf.height, conf.width, 1)
 
 
 def show_metrics(history, length, save_path):
@@ -363,4 +363,5 @@ def plot_images(plots, cols=8):
 
     fig.subplots_adjust(hspace=12)
     plt.tight_layout()
-    plt.waitforbuttonpress()
+    plt.show()
+    # plt.waitforbuttonpress()

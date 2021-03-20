@@ -24,44 +24,48 @@ import json
 import csv
 import sys
 import os
-from os.path import exists, join, abspath, dirname
+from os.path import exists, join, dirname
+from pathlib import Path
 
 import keras.backend as K
 import tensorflow as tf
 
 from reflection_padding_2D import ReflectionPadding2D
 
-# sys.path.append('../')
-# import load_data
-
-
-# sys.path.insert(1, dirname(abspath(__file__)) + '/../SimGAN-Captcha/')
 
 np.random.seed(seed=12345)
 
 physical_devices = tf.config.experimental.list_physical_devices('GPU')
 tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
+BASE_FOLDER = 'refiner'
+MODELS_FOLDER = 'models'
+MODEL_G_A2B = 'G_A2B_model'
+MODEL_G_B2A = 'G_B2A_model'
+MODEL_D_A = 'D_A_model'
+MODEL_D_B = 'D_B_model'
+MODEL_G = 'G_model'
+
 
 class CycleGAN():
     def __init__(self, flags):
         self.flags = flags
+        self.data_generator = DataGenerator(self.flags.synthesizer, self.flags.real_generator, self.flags.batch_size)
+
+    def init_folders(self):
         # Used as storage folder name
         self.date_time = time.strftime('%Y%m%d-%H%M%S', time.localtime()) + '_test'
 
         # ================ prepare directories ==============
-        self.base_folder = f'refiner/{self.date_time}'
+        self.base_folder = f'{BASE_FOLDER}/{self.date_time}'
         self.image_folder = join(self.base_folder, 'images')
-        if not exists(join(self.image_folder, 'A')):
-            os.makedirs(join(self.image_folder, 'A'))
-            os.makedirs(join(self.image_folder, 'B'))
+        if not exists(self.image_folder):
+            os.makedirs(self.image_folder)
 
         # Create folder to save model architecture and weights
-        self.model_folder = join(self.base_folder, 'saved_models')
+        self.model_folder = join(self.base_folder, MODELS_FOLDER)
         if not exists(self.model_folder):
             os.makedirs(self.model_folder)
-
-        self.data_generator = DataGenerator(self.flags.synthesizer, self.flags.real_generator, self.flags.batch_size)
 
     def init_models(self):
         self.img_shape = self.flags.img_shape
@@ -130,8 +134,8 @@ class CycleGAN():
         image_B = Input(shape=self.img_shape)
         guess_A = D_A(image_A)
         guess_B = D_B(image_B)
-        self.D_A = Model(inputs=image_A, outputs=guess_A, name='D_A_model')
-        self.D_B = Model(inputs=image_B, outputs=guess_B, name='D_B_model')
+        self.D_A = Model(inputs=image_A, outputs=guess_A, name=MODEL_D_A)
+        self.D_B = Model(inputs=image_B, outputs=guess_B, name=MODEL_D_B)
         self.D_A.summary()
         self.D_B.summary()
         self.D_A.compile(optimizer=self.opt_D,
@@ -151,9 +155,9 @@ class CycleGAN():
         self.D_B_static.trainable = False
 
         # Generators
-        self.G_A2B = self.modelGenerator(name='G_A2B_model')
+        self.G_A2B = self.modelGenerator(name=MODEL_G_A2B)
 
-        self.G_B2A = self.modelGenerator(name='G_B2A_model')
+        self.G_B2A = self.modelGenerator(name=MODEL_G_B2A)
         self.G_A2B.summary()
         self.G_B2A.summary()
 
@@ -198,7 +202,7 @@ class CycleGAN():
 
         self.G_model = Model(inputs=[real_A, real_B],
                              outputs=model_outputs,
-                             name='G_model')
+                             name=MODEL_G)
 
         self.G_model.compile(optimizer=self.opt_G,
                              loss=compile_losses,
@@ -327,7 +331,19 @@ class CycleGAN():
     def train(self):
         matplotlib.use("Agg")
 
-        self.init_models()
+        if self.flags.retrain:
+            base_folder = sorted(Path(BASE_FOLDER).iterdir(), key=os.path.getmtime)[-1]
+            models_folder = f'{base_folder}/{MODELS_FOLDER}'
+            last_file = sorted(Path(models_folder).iterdir(), key=os.path.getmtime)[-1]
+            epoch = int(last_file[last_file.rindex('_') + 1, last_file.rindex('.')])
+            self.G_model = load_model(f'{models_folder}/{MODEL_G}_epoch_{epoch}.h5')
+            self.D_A = load_model(f'{models_folder}/{MODEL_D_A}_epoch_{epoch}.h5')
+            self.D_B = load_model(f'{models_folder}/{MODEL_D_B}_epoch_{epoch}.h5')
+            self.G_A2B = load_model(f'{models_folder}/{MODEL_G_A2B}_epoch_{epoch}.h5')
+            self.G_B2A = load_model(f'{models_folder}/{MODEL_G_B2A}_epoch_{epoch}.h5')
+        else:
+            self.init_folders()
+            self.init_models()
 
         def run_training_iteration(loop_index, epoch_iterations):
             # ======= Discriminator training ==========
@@ -426,7 +442,7 @@ class CycleGAN():
 
             if loop_index % 20 == 0:
                 # Save temporary images continously
-                self.save_tmp_images(real_images_A, real_images_B, synthetic_images_A, synthetic_images_B)
+                self.previewTmp(real_images_A[0], real_images_B[0], synthetic_images_A[0], synthetic_images_B[0])
                 self.print_ETA(start_time, epoch, epoch_iterations, loop_index)
 
         # ======================================================================
@@ -489,22 +505,18 @@ class CycleGAN():
 
             if epoch % self.save_interval == 0:
                 print('\n', '\n', '-------------------------Saving results for epoch', epoch, '-------------------------', '\n', '\n')
-                self.saveImages(epoch, real_images_A, real_images_B)
+                self.previewEpoch(epoch, real_images_A[0], real_images_B[0])
 
-                # self.saveModel(self.G_model)
-                # self.saveModel(self.D_A, epoch)
-                # self.saveModel(self.D_B, epoch)
-                self.G_A2B.save(f'{self.model_folder}/{self.G_A2B.name}_weights_epoch_{epoch}')
-                self.G_B2A.save(f'{self.model_folder}/{self.G_B2A.name}_weights_epoch_{epoch}')
+                self.G_model.save(f'{self.model_folder}/{self.G_model.name}_epoch_{epoch}.h5')
+                self.D_A.save(f'{self.model_folder}/{self.D_A.name}_epoch_{epoch}.h5')
+                self.D_B.save(f'{self.model_folder}/{self.D_B.name}_epoch_{epoch}.h5')
+                self.G_A2B.save(f'{self.model_folder}/{self.G_A2B.name}_epoch_{epoch}.h5')
+                self.G_B2A.save(f'{self.model_folder}/{self.G_B2A.name}_epoch_{epoch}.h5')
 
             # save the last one as formal
             print('Finishing...')
-            G_A2B = self.modelGenerator(name='G_A2B_model')
-            G_A2B.load_weights(self.flags.refiner_forward_model_path)
-            G_A2B.save(self.flags.refiner_forward_model_path)
-            G_B2A = self.modelGenerator(name='G_B2A_model')
-            G_B2A.load_weights(self.flags.refiner_backward_model_path)
-            G_B2A.save(self.flags.refiner_backward_model_path)
+            self.G_A2B.save(self.flags.refiner_forward_model_path)
+            self.G_B2A.save(self.flags.refiner_backward_model_path)
 
             training_history = {
                 'DA_losses': DA_losses,
@@ -532,55 +544,25 @@ class CycleGAN():
         loss = tf.reduce_mean(tf.abs(y_pred - y_true))
         return loss
 
-    def truncateAndSave(self, real, synthetic, reconstructed, path_name):
-        if len(real.shape) > 3:
-            real = real[0]
-            synthetic = synthetic[0]
-            reconstructed = reconstructed[0]
-
-        # Append and save
-        # if real_ is not None:
-        #     if len(real_.shape) > 4:
-        #         real_ = real_[0]
-        #     image = np.hstack((real_[0], real, synthetic, reconstructed))
-        # else:
-        image = np.hstack((real, synthetic, reconstructed))
-
-        if self.channels == 1:
-            image = image[:, :, 0]
-
+    def saveImage(self, image, path_name):
         plt.imshow(image, cmap='gray')
         plt.axis(False)
         plt.savefig(path_name)
 
-    def saveImages(self, epoch, real_image_A, real_image_B):
-        if len(real_image_A.shape) < 4:
-            real_image_A = np.expand_dims(real_image_A, axis=0)
-            real_image_B = np.expand_dims(real_image_B, axis=0)
+    def previewEpoch(self, epoch, real_image_A, real_image_B):
+        img = self.preview(self.G_A2B, self.G_B2A, real_image_A, real_image_B)
+        self.saveImage(img, f'{self.image_folder}/epoch_{epoch}.png')
 
-        synthetic_image_B = self.G_A2B.predict(real_image_A)
-        synthetic_image_A = self.G_B2A.predict(real_image_B)
-        reconstructed_image_A = self.G_B2A.predict(synthetic_image_B)
-        reconstructed_image_B = self.G_A2B.predict(synthetic_image_A)
-
-        self.truncateAndSave(real_image_A, synthetic_image_B, reconstructed_image_A,
-                             f'{self.image_folder}/A/epoch{epoch}_sample.png')
-        self.truncateAndSave(real_image_B, synthetic_image_A, reconstructed_image_B,
-                             f'{self.image_folder}/B/epoch{epoch}_sample.png')
-
-    def save_tmp_images(self, real_image_A, real_image_B, synthetic_image_A, synthetic_image_B):
+    def previewTmp(self, A_test, B_test, synthetic_A, synthetic_B):
         try:
-            reconstructed_image_A = self.G_B2A.predict(synthetic_image_B)
-            reconstructed_image_B = self.G_A2B.predict(synthetic_image_A)
+            reconstructed_A = self.G_B2A.predict(np.array([synthetic_B]))[0]
+            reconstructed_B = self.G_A2B.predict(np.array([synthetic_A]))[0]
 
-            real_images = np.vstack((real_image_A[0], real_image_B[0]))
-            synthetic_images = np.vstack((synthetic_image_B[0], synthetic_image_A[0]))
-            reconstructed_images = np.vstack((reconstructed_image_A[0], reconstructed_image_B[0]))
-
-            self.truncateAndSave(real_images, synthetic_images, reconstructed_images,
-                                 f'{self.image_folder}/tmp.png')
+            img = self.combine_imgs(A_test, B_test, synthetic_A, synthetic_B, reconstructed_A, reconstructed_B)
+            self.saveImage(img, f'{self.image_folder}/tmp.png')
         except Exception:  # Ignore if file is open
-            pass
+            import traceback; traceback.print_exc()
+            import pdb; pdb.set_trace()
 
     def get_lr_linear_decay_rate(self):
         # Calculate decay rates
@@ -621,14 +603,6 @@ class CycleGAN():
 
 # ===============================================================================
 # Save and load
-
-    def saveModel(self, model, filepath):
-        return
-        model.save_weights(filepath + '.hdf5')
-        json_string = model.to_json()
-        with open(filepath + '.json', 'w') as outfile:
-            json.dump(json_string, outfile)
-        print('{} has been saved in {}'.format(model.name, dirname(filepath)))
 
     def writeLossDataToFile(self, history):
         keys = sorted(history.keys())
@@ -672,21 +646,40 @@ class CycleGAN():
         G_B2A = load_model(self.flags.refiner_backward_model_path, custom_objects=get_refiner_custom_objects())
 
         A_test, B_test = next(self.data_generator)
+        plot_images(self.preview(G_A2B, G_B2A, A_test, B_test), 3)
 
-        synthetic_images_B = G_A2B.predict(A_test)
-        synthetic_images_A = G_B2A.predict(B_test)
+    def preview(self, G_A2B, G_B2A, A_test, B_test):
+        if len(A_test.shape) == 3:  # single
+            isSingle = True
+            A_test = np.array([A_test])
+            B_test = np.array([B_test])
+        else:
+            isSingle = False
 
-        plots = []
-        for i in range(len(synthetic_images_A)):
-            test_A = A_test[i]
-            test_B = B_test[i]
-            synt_A = synthetic_images_A[i]
-            synt_B = synthetic_images_B[i]
-            img1 = np.concatenate((test_A, synt_B), 1)
-            img2 = np.concatenate((test_B, synt_A), 1)
-            plots.append(np.concatenate((img1, img2)))
+        synthetic_B = G_A2B.predict(A_test)
+        reconstructed_A = G_B2A.predict(synthetic_B)
+        synthetic_A = G_B2A.predict(B_test)
+        reconstructed_B = G_A2B.predict(synthetic_A)
 
-        plot_images(np.squeeze(plots), 4)
+        if isSingle:
+            plots = self.combine_imgs(A_test[0], B_test[0], synthetic_A[0], synthetic_B[0], reconstructed_A[0], reconstructed_B[0])
+        else:
+            plots = []
+            for i in range(len(synthetic_A)):
+                test_A = A_test[i]
+                test_B = B_test[i]
+                synt_A = synthetic_A[i]
+                synt_B = synthetic_B[i]
+                reco_A = reconstructed_A[i]
+                reco_B = reconstructed_B[i]
+                plots.append(self.combine_imgs(test_A, test_B, synt_A, synt_B, reco_A, reco_B))
+
+        return np.squeeze(plots)
+
+    def combine_imgs(self, test_A, test_B, synt_A, synt_B, reco_A, reco_B):
+        img1 = np.hstack((test_A, synt_B, reco_A))
+        img2 = np.hstack((test_B, synt_A, reco_B))
+        return np.vstack((img1, img2))
 
 
 class DataGenerator():
@@ -703,7 +696,7 @@ class DataGenerator():
         return self
 
     def __next__(self):
-        return normalize(self.synthesizer.get_batch(no_label=True)), self.real_generator.get_batch()
+        return normalize(self.synthesizer.get_batch(self.batch_size, no_label=True)), self.real_generator.get_batch()
 
 
 class RealGenerator():
@@ -821,6 +814,13 @@ def parse_args(args=None):
                 'type': str,
                 'required': True,
                 'help': 'inner folder where real images reside',
+            }
+        ),
+        (
+            ('-r', '--retrain'),
+            {
+                'action': 'store_true',
+                'help': 'continue training based on the last epoch',
             }
         ),
         (('cmd', ), {'nargs': '?', 'help': 'train, test'}),
