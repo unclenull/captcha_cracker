@@ -55,6 +55,10 @@ def parse_args(extra=None, args=None):
         type=int,
         help='batch size for all operations')
     parser.add_argument(
+        '-e', '--epochs',
+        default=200,
+        type=int)
+    parser.add_argument(
         '--dataset-dir',
         default=DIR_DATASET,
         type=str,
@@ -91,7 +95,6 @@ def parse_args(extra=None, args=None):
     else:
         extra = None
 
-    # import pdb; pdb.set_trace()
     name = classes = FLAGS.classes or ''
     if not classes:
         if os.path.isfile(FLAGS.syn_conf):
@@ -158,21 +161,28 @@ def normalize(images):
     return images
 
 
-def data_generator_from_fs(images, batch_size, img_shape, length, classes, no_first=False):
+def normalize_batches(images):  # list of objects
+    shape = list(images[0].shape)
+    shape.insert(0, -1)
+    images = np.vstack(images).reshape(shape)
+    images = normalize(images)
+    return images
+
+
+def data_generator_from_fs(images, batch_size, length, classes, img_shape=None):
     total = len(images)
     if total < batch_size:
         batch_size = total
-    if not no_first:
-        # this first batch only returns shape
-        yield np.zeros([batch_size] + list(img_shape)), [np.zeros(batch_size)] * length
-
     while True:
         # epoch begins
         np.random.shuffle(images)
         x, y = [], []
-        for img in images:
-            x.append(cv2.imread(img, cv2.IMREAD_GRAYSCALE))
-            y.append(parse_filename_label(img, length, classes))
+        for imgpath in images:
+            img = cv2.imread(imgpath, cv2.IMREAD_GRAYSCALE)
+            if img_shape:
+                img = cv2.resize(img, (img_shape[1], img_shape[0]))
+            x.append(img)
+            y.append(parse_filename_label(imgpath, length, classes))
             if len(x) >= batch_size:
                 x = normalize(x)
                 y = np.array(y)
@@ -184,6 +194,7 @@ def data_generator_from_fs(images, batch_size, img_shape, length, classes, no_fi
                 x, y = [], []
         # epoch ends
         if len(x) > 0:  # the last batch doesn't have enough
+            x = normalize(x)
             y = np.array(y)
             if length > 1:
                 y = [y[:, i] for i in range(length)]
@@ -192,76 +203,103 @@ def data_generator_from_fs(images, batch_size, img_shape, length, classes, no_fi
             yield np.array(x), y
 
 
-def data_generator_from_syn(syn, batch_size, img_shape, length, classes, no_first=False):
-    if not no_first:
-        # this first batch only returns shape
-        yield np.zeros([batch_size] + list(img_shape)), [np.zeros(batch_size)] * length
-
+def data_generator_from_syn(syn, batch_size, length, classes):
     while True:
         # epoch begins
         x, y = [], []
-        for _ in range(batch_size):
-            img, text = syn()
+        batches = syn(batch_size)
+        for b in batches:
+            img, text = b
             x.append(img)
             y.append(parse_label(text, classes))
 
         # import pdb; pdb.set_trace()
-        x = normalize(x)
+        # x = normalize(x)
         y = np.array(y)
         if length > 1:
             y = [y[:, i] for i in range(length)]
         else:  # array will trigger error
             y = y[:, 0]
-        yield x, y
+        yield np.array(x), y
 
 
-def get_recognizer_generator(FLAGS, both=False, no_first=False):
+def get_recognizer_generator(FLAGS, both=False):
+    image_syn = None
     if FLAGS.gen is not None:
         if callable(FLAGS.gen):
-            return FLAGS.gen()
+            image_gen = FLAGS.gen()
         elif os.path.isfile(FLAGS.gen):
-            image_syn = imp.load_source('custom.generator', FLAGS.gen).default().get_one
-            img_shape = (FLAGS.height, FLAGS.width, 1)
+            image_gen = imp.load_source('custom.generator', FLAGS.gen).default().get_batch
+        else:
+            print('FLAGS.gen is invalid')
+            exit()
+
+        def image_syn(*args):
+            batches = image_gen(*args)
+            images = normalize_batches(batches[:, 0])
+            labels = batches[:, 1]
+            batches = np.array([(images[i], labels[i]) for i in range(batches.shape[0])])
+            return batches
+
+        img_shape = (FLAGS.height, FLAGS.width, 1)
     else:
-        rs = get_refined_image_gen(FLAGS)
+        rs = get_refined_image_gen(FLAGS, both)
         if rs is not None:
             image_syn, img_shape = rs
 
     if image_syn is not None:
-        gen = data_generator_from_syn(image_syn, FLAGS.batch_size, img_shape, FLAGS.length, FLAGS.classes, no_first)
-        count = FLAGS.samples
+        gen = data_generator_from_syn(image_syn, FLAGS.batch_size, FLAGS.length, FLAGS.classes)
+        gen = (gen, ceil(FLAGS.samples * FLAGS.test_ratio))
         if both:
-            gen2 = data_generator_from_syn(image_syn, FLAGS.batch_size, img_shape, FLAGS.length, FLAGS.classes, no_first)
-            gen = (gen, gen2)
+            gen2 = data_generator_from_syn(image_syn, FLAGS.batch_size, FLAGS.length, FLAGS.classes)
+            gen = ((gen2, FLAGS.samples), gen)
     elif os.path.isdir(FLAGS.dataset_dir):
         samples = glob.glob(f'{FLAGS.dataset_path}/test/*')
         img_shape = cv2.imread(samples[0], cv2.IMREAD_GRAYSCALE).shape
         img_shape = list(img_shape)
-        img_shape.append(1)
-        gen = data_generator_from_fs(samples, FLAGS.batch_size, img_shape, FLAGS.length, FLAGS.classes, no_first)
-        count = len(samples)
+        if FLAGS.height:
+            img_shape[0] = FLAGS.height
+        if FLAGS.width:
+            img_shape[1] = FLAGS.width
+        # import pdb; pdb.set_trace()
+        gen = data_generator_from_fs(
+            samples, FLAGS.batch_size, FLAGS.length, FLAGS.classes,
+            img_shape=img_shape if FLAGS.height or FLAGS.width else None
+        )
+        gen = (gen, len(samples))
 
         if both:
             samples = glob.glob(f'{FLAGS.dataset_path}/train/*')
-            gen2 = data_generator_from_fs(samples, FLAGS.batch_size, img_shape, FLAGS.length, FLAGS.classes, no_first)
-            gen = (gen2, gen)
+            gen2 = data_generator_from_fs(
+                samples, FLAGS.batch_size, FLAGS.length, FLAGS.classes,
+                img_shape=img_shape if FLAGS.height or FLAGS.width else None
+            )
+            gen = ((gen2, len(samples)), gen)
+        img_shape.append(1)
     else:
         return None
 
-    return gen, img_shape, count
+    return gen, img_shape
 
 
-def get_refined_image_gen(FLAGS):
+def get_refined_image_gen(FLAGS, noRefine):
     rs = get_synthesizer(FLAGS)
     if rs is None:
         return
 
     syn_gen, img_shape = rs
-    refiner = load_model(FLAGS.refiner_forward_model_path, custom_objects=get_refiner_custom_objects())
+    refiner = None
+    if not noRefine:
+        refiner = load_model(FLAGS.refiner_forward_model_path, custom_objects=get_refiner_custom_objects())
 
-    def new_gen():
-        img, txt = syn_gen.get_one()
-        return refiner.predict_on_batch(normalize([img]))[0], txt
+    def new_gen(batch_size):
+        batches = syn_gen.get_batch(batch_size)
+        images = normalize_batches(batches[:, 0])
+        if refiner:
+            images = refiner.predict_on_batch(images)
+        labels = batches[:, 1]
+        batches = np.array([(images[i], labels[i]) for i in range(batches.shape[0])])
+        return batches
 
     return new_gen, img_shape
 
@@ -271,6 +309,9 @@ def get_refiner_custom_objects():
 
 
 def get_synthesizer(FLAGS):
+    if FLAGS.syn is None:
+        return
+
     if callable(FLAGS.syn):
         return FLAGS.syn()
     elif os.path.isfile(FLAGS.syn):
@@ -285,18 +326,16 @@ def get_synthesizer(FLAGS):
 
 def show_metrics(history, length, save_path):
     fig, axes = plt.subplots(1, 2, figsize=(20, 5))
+    keys = history.history.keys()
     epochs = len(history.history['loss'])
     history = pd.DataFrame(history.history)
 
-    loss_fields = ['loss', 'val_loss']
     if length > 1:
-        accuracy_fields = []
-        for i in range(length):
-            accuracy_fields.append(f'c{i}_acc')
-            accuracy_fields.append(f'val_c{i}_acc')
-            loss_fields.append(f'c{i}_loss')
-            loss_fields.append(f'val_c{i}_loss')
+        loss_fields = [k for k in keys if k.endswith('_loss')]
+        loss_fields.remove('val_loss')
+        accuracy_fields = [k for k in keys if k.endswith('_acc')]
     else:
+        loss_fields = ['loss', 'val_loss']
         accuracy_fields = ['acc', 'val_acc']
 
     history[accuracy_fields].plot(
@@ -311,7 +350,6 @@ def show_metrics(history, length, save_path):
     )
     history[loss_fields].plot(
         ax=axes[1],
-        figsize=(8, 5),
         grid=True,
         xticks=(np.arange(0, epochs, 1) if epochs < 10 else None),
         xlabel='Epoch',
@@ -326,17 +364,25 @@ def get_label_string(tensors, classes):
 
 
 def show_test(images_test, labels_true, labels_pred, classes):
+    total = len(images_test)
+    if total == 0:
+        print('No data test to show.')
+        return
+
     plots = []
+    positives = 0
     for i, label in enumerate(labels_true):
         cap = '{}({})'.format(get_label_string(labels_pred[i], classes), get_label_string(labels_true[i], classes))
-        plots.append((images_test[i], cap, not np.array_equal(labels_pred[i], label)))
+        correct = np.array_equal(labels_pred[i], label)
+        if correct:
+            positives += 1
+        plots.append((images_test[i], cap, not correct))
 
-    if len(plots) == 0:
-        return
-    plot_images(plots)
+    percent = round(positives / total, 4) * 100
+    plot_images(plots, title=f'Accuracy: {percent}%({positives}/{total})')
 
 
-def plot_images(plots, cols=8):
+def plot_images(plots, cols=8, title=None):
     """
     plots: ((image, label, [isHighlight]), )
     """
@@ -362,6 +408,8 @@ def plot_images(plots, cols=8):
             ax.axis(False)
 
     fig.subplots_adjust(hspace=12)
+    if title is not None:
+        fig.canvas.set_window_title(title)
     plt.tight_layout()
     plt.show()
     # plt.waitforbuttonpress()

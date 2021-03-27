@@ -67,7 +67,7 @@ class CycleGAN():
         if not exists(self.model_folder):
             os.makedirs(self.model_folder)
 
-    def init_models(self):
+    def init_opts(self):
         self.img_shape = self.flags.img_shape
         self.channels = self.img_shape[-1]
         self.normalization = InstanceNormalization
@@ -114,6 +114,7 @@ class CycleGAN():
         # Tweaks
         self.REAL_LABEL = 0.9  # Use e.g. 0.9 to avoid training the discriminators to zero loss
 
+    def init_models(self):
         # optimizer
         self.opt_D = Adam(self.learning_rate_D, self.beta_1, self.beta_2)
         self.opt_G = Adam(self.learning_rate_G, self.beta_1, self.beta_2)
@@ -330,17 +331,28 @@ class CycleGAN():
 # Training
     def train(self):
         matplotlib.use("Agg")
+        self.init_opts()
 
         if self.flags.retrain:
+            obj = get_refiner_custom_objects()
+            obj['cycle_loss'] = self.cycle_loss
+            obj['lse'] = self.lse
+
             base_folder = sorted(Path(BASE_FOLDER).iterdir(), key=os.path.getmtime)[-1]
             models_folder = f'{base_folder}/{MODELS_FOLDER}'
-            last_file = sorted(Path(models_folder).iterdir(), key=os.path.getmtime)[-1]
-            epoch = int(last_file[last_file.rindex('_') + 1, last_file.rindex('.')])
-            self.G_model = load_model(f'{models_folder}/{MODEL_G}_epoch_{epoch}.h5')
-            self.D_A = load_model(f'{models_folder}/{MODEL_D_A}_epoch_{epoch}.h5')
-            self.D_B = load_model(f'{models_folder}/{MODEL_D_B}_epoch_{epoch}.h5')
-            self.G_A2B = load_model(f'{models_folder}/{MODEL_G_A2B}_epoch_{epoch}.h5')
-            self.G_B2A = load_model(f'{models_folder}/{MODEL_G_B2A}_epoch_{epoch}.h5')
+            last_file = sorted(Path(models_folder).iterdir(), key=os.path.getmtime)[-1].stem
+            epoch = int(last_file[last_file.rindex('_') + 1:])
+
+            def load(model_name):
+                return load_model(f'{models_folder}/{model_name}_epoch_{epoch}.h5', custom_objects=obj)
+
+            self.G_model = load(MODEL_G)
+            self.D_A = load(MODEL_D_A)
+            self.D_B = load(MODEL_D_B)
+            self.G_A2B = load(MODEL_G_A2B)
+            self.G_B2A = load(MODEL_G_B2A)
+
+            self.init_folders()
         else:
             self.init_folders()
             self.init_models()
@@ -513,10 +525,9 @@ class CycleGAN():
                 self.G_A2B.save(f'{self.model_folder}/{self.G_A2B.name}_epoch_{epoch}.h5')
                 self.G_B2A.save(f'{self.model_folder}/{self.G_B2A.name}_epoch_{epoch}.h5')
 
-            # save the last one as formal
-            print('Finishing...')
-            self.G_A2B.save(self.flags.refiner_forward_model_path)
-            self.G_B2A.save(self.flags.refiner_backward_model_path)
+                # save the last one as formal
+                self.G_A2B.save(self.flags.refiner_forward_model_path)
+                self.G_B2A.save(self.flags.refiner_backward_model_path)
 
             training_history = {
                 'DA_losses': DA_losses,
@@ -785,13 +796,6 @@ class ImagePool():
 
 def parse_args(args=None):
     flags = base_parse_args([
-        (
-            ('-e', '--epochs'),
-            {
-                'default': 200,
-                'type': int,
-            }
-        ),
         (
             ('--lr-D',),
             {
