@@ -1,22 +1,7 @@
-"""
-"""
-
+import numpy as np
 import random
-
-from wheezy.captcha.comp import Draw, Image, ImageFilter, getrgb, truetype
-
-
-# region: captcha drawers
-
-
-def background(color="#EEEECC"):
-    color = getrgb(color)
-
-    def drawer(image, text):
-        Draw(image).rectangle([(0, 0), image.size], fill=color)
-        return image
-
-    return drawer
+from PIL import Image, ImageFilter
+from PIL.ImageDraw import Draw
 
 
 def smooth():
@@ -27,7 +12,7 @@ def smooth():
 
 
 def curve(color="#5C87B2", width=4, number=6):
-    from wheezy.captcha.bezier import make_bezier
+    from .bezier import make_bezier
 
     if not callable(color):
         c = getrgb(color)
@@ -79,54 +64,152 @@ def noise(number=50, color="#EEEECC", level=2):
 
 
 def text(
-    fonts, font_sizes=None, drawings=None, color="#5C87B2", squeeze_factor=0.8
+    fonts=None,
+    select_font=None,
+    drawings=None,
+    color=None,
+    stroke=(0, None),
+    even=None,
+    offset_x=None,
+    offset_y=None,
+    offset_char_x=None,
+    offset_char_y=None,
+    padding_x=None,
+    padding_y=None,
 ):
-    # import pdb; pdb.set_trace()
-    fonts = tuple(
-        [
-            truetype(name, size)
-            for name in fonts
-            for size in font_sizes or (65, 70, 75)
-        ]
-    )
-    if not callable(color):
-        c = getrgb(color)
+    offset_x = offset_x()
+    offset_y = offset_y()
+    stroke_size, stroke_color = stroke
 
-        def color():
-            return c
+    if offset_char_y is True:  # random
+        def get_offset_char_y(i, count, max_y):
+            return random.choice(range(max_y))
+    elif callable(offset_char_y):
+        get_offset_char_y = offset_char_y
+    else:
+        def get_offset_char_y(i, count, max_y):
+            return int(max_y / 2)
+
+    if not even:
+        if isinstance(offset_char_x, int):  # (-int, +int)
+            def get_offset_char_x(i, count, max_x):
+                if i > 0:
+                    min_x = -offset_char_x
+                else:
+                    min_x = 0
+                if i < count - 1:
+                    max_x += offset_char_x
+                if min_x >= max_x:
+                    print(f'Horizontal space is not enough!!! {min_x} >= {max_x}')
+                    exit()
+                return random.choice(range(min_x, max_x))
+        elif isinstance(offset_char_x, tuple):
+            def get_offset_char_x(i, count, max_x):
+                if i > 0:
+                    min_x = offset_char_x[0]
+                else:
+                    min_x = 0
+                if i < count - 1:
+                    max_x += offset_char_x[1]
+                if min_x >= max_x:
+                    print(f'Horizontal space is not enough!!! {min_x} >= {max_x}')
+                    exit()
+                return random.choice(range(min_x, max_x))
+        elif callable(offset_char_x):
+            get_offset_char_x = offset_char_x
+
+    def get_dimen(image):
+        width, height = image.size
+        width = width - padding_x * 2
+        if width < 0:
+            print(f'Horizontal space {width} is not enough, padding x {padding_x} is too large!!!')
+            exit()
+        height = height - padding_y * 2
+        if height < 0:
+            print(f'Vertical space {height} is not enough, padding y {padding_y} is too large!!!')
+            exit()
+        return width, height
+
+    def copy_even(image, chars):
+        # import pdb; pdb.set_trace()
+        width, height = get_dimen(image)
+        if callable(offset_char_x):
+            _offset_char_x = offset_char_x()
+        else:
+            _offset_char_x = offset_char_x
+        count = len(chars)
+        width_chars = sum(c.size[0] for c in chars) + _offset_char_x * (count - 1)
+        left = padding_x + offset_x + int((width - width_chars) / 2)
+        for i, c in enumerate(chars):
+            c_width, c_height = c.size
+            # import pdb; pdb.set_trace()
+            space_y = height - c_height
+            if space_y < 0:
+                print(f'Vertical space is not enough!!! {i}: {height} <= {c_height}')
+                exit()
+            top = padding_y + offset_y + get_offset_char_y(i, count, space_y)
+            image.paste(c, (left, top), c)
+            # mask = c.convert("L").point(lambda i: i * 1.8)
+            # image.paste(c, (left, top), mask)
+            left += c_width + _offset_char_x
+
+    def copy_odd(image, chars):
+        width, height = get_dimen(image)
+        count = len(chars)
+        char_space_x = round(width / count)
+        left = padding_x + offset_x
+
+        for i, c in enumerate(chars):
+            print(np.array(c))
+            c_width, c_height = c.size
+            space_y = height - c_height
+            if space_y < 0:
+                print(f'Vertical space is not enough!!! {i}: {height} <= {c_height}')
+                exit()
+            top = padding_y + offset_y + get_offset_char_y(i, count, space_y)
+            max_x = char_space_x - c_width
+            # mask = c.convert("L")
+            # print(i, '---------------------')
+            # print(np.array(mask))
+            # mask = mask.point(lambda i: i * 1.8)
+            # print(i, '=====================')
+            # print(np.array(mask))
+            image.paste(c, (left + get_offset_char_x(i, count, max_x), top), c)
+            left += char_space_x
 
     def drawer(image, text):
         draw = Draw(image)
         char_images = []
-        for c in text:
-            font = random.choice(fonts)
-            c_width, c_height = draw.textsize(c, font=font)
-            char_image = Image.new("RGB", (c_width, c_height), (0, 0, 0))
+        height_fixed = None
+        min_y = 0
+        if len(fonts) == 1:
+            font = fonts[0]
+            if offset_char_y is False:  # keep em only for single font
+                offsets = [font.getbbox(c, stroke_width=stroke_size) for c in text]
+                offsets = np.array(offsets)
+                min_y = min(offsets[:, 1])
+                max_y = max(offsets[:, 3])
+                height_fixed = max_y - min_y
+        for i, c in enumerate(text):
+            if select_font is not None:
+                font = select_font(i, fonts)
+            else:
+                font = random.choice(fonts)
+            # import pdb; pdb.set_trace()
+            c_width, c_height = draw.textsize(c, font=font, stroke_width=stroke_size)
+            char_image = Image.new("RGBA", (c_width, height_fixed or c_height), (0,) * 4)
             char_draw = Draw(char_image)
-            char_draw.text((0, 0), c, font=font, fill=color())
-            char_image = char_image.crop(char_image.getbbox())
+            char_draw.text((-font.getoffset(c)[0], -min_y), c, font=font, fill=color(i, c), stroke_width=stroke_size, stroke_fill=stroke_color)
+            if offset_char_y is not False:
+                char_image = char_image.crop(char_image.getbbox())
             for drawing in drawings:
-                char_image = drawing(char_image)
+                char_image = drawing(i, c, char_image)
             char_images.append(char_image)
-        width, height = image.size
-        offset = int(
-            (
-                width
-                - sum(
-                    int(i.size[0] * squeeze_factor) for i in char_images[:-1]
-                )
-                - char_images[-1].size[0]
-            )
-            / 2
-        )
-        for char_image in char_images:
-            c_width, c_height = char_image.size
-            # mask = char_image.convert("L").point(lambda i: i * 1.97)
-            mask = char_image.convert("L")
-            image.paste(
-                char_image, (offset, int((height - c_height) / 2)), mask
-            )
-            offset += int(c_width * squeeze_factor)
+
+        if even:
+            copy_even(image, char_images)
+        else:
+            copy_odd(image, char_images)
         return image
 
     return drawer
@@ -136,7 +219,7 @@ def text(
 
 
 def warp(dx_factor=0.27, dy_factor=0.21):
-    def drawer(image):
+    def drawer(i, c, image):
         width, height = image.size
         dx = width * dx_factor
         dy = height * dy_factor
@@ -144,9 +227,7 @@ def warp(dx_factor=0.27, dy_factor=0.21):
         y1 = int(random.uniform(-dy, dy))
         x2 = int(random.uniform(-dx, dx))
         y2 = int(random.uniform(-dy, dy))
-        image2 = Image.new(
-            "RGB", (width + abs(x1) + abs(x2), height + abs(y1) + abs(y2))
-        )
+        image2 = Image.new("RGB", (width + abs(x1) + abs(x2), height + abs(y1) + abs(y2)))
         image2.paste(image, (abs(x1), abs(y1)))
         width2, height2 = image2.size
         return image2.transform(
@@ -167,22 +248,30 @@ def warp(dx_factor=0.27, dy_factor=0.21):
     return drawer
 
 
-def offset(dx_factor=0.1, dy_factor=0.2):
-    def drawer(image):
-        width, height = image.size
-        dx = int(random.random() * width * dx_factor)
-        dy = int(random.random() * height * dy_factor)
-        image2 = Image.new("RGB", (width + dx, height + dy))
-        image2.paste(image, (dx, dy))
-        return image2
+def rotate(angle=25):
+    def drawer(i, c, image):
+        return image.rotate(
+            random.uniform(-angle, angle), Image.BILINEAR, expand=1
+        )
 
     return drawer
 
 
-def rotate(angle=25):
-    def drawer(image):
-        return image.rotate(
-            random.uniform(-angle, angle), Image.BILINEAR, expand=1
-        )
+def resize(cfg):
+    if callable(cfg):
+        resize = cfg
+    else:
+        if isinstance(cfg[0], float):
+            def resize(width, height):
+                return round(width * cfg[0]), round(height * cfg[1])
+        elif isinstance(cfg[0], int):
+            def resize(width, height):
+                return cfg[0], cfg[1]
+        else:
+            print('Invalid arg "resize"')
+            exit()
+
+    def drawer(i, c, image):
+        return image.resize((resize(*image.size)))
 
     return drawer
