@@ -82,9 +82,11 @@ class CycleGAN():
         self.beta_1 = 0.5
         self.beta_2 = 0.999
         self.batch_size = self.flags.batch_size
+        self.synthetic_pool_size = 50
         self.epochs = self.flags.epochs  # choose multiples of 25 since the models are save each 25th epoch
         self.save_interval = 1
-        self.synthetic_pool_size = 50
+        if self.epochs > 20:
+            self.save_interval = min(5, int(self.epochs / 20))
 
         # Linear decay of learning rate, for both discriminators and generators
         self.use_linear_decay = False
@@ -502,47 +504,50 @@ class CycleGAN():
         # Start stopwatch for ETAs
         start_time = time.time()
 
-        for epoch in range(1, self.epochs + 1):
-            loop_index = 0
-            for images in self.data_generator:
-                real_images_A = images[0]
-                real_images_B = images[1]
+        try:
+            for epoch in range(1, self.epochs + 1):
+                loop_index = 0
+                for images in self.data_generator:
+                    real_images_A = images[0]
+                    real_images_B = images[1]
 
-                # Run all training steps
-                run_training_iteration(loop_index, self.data_generator.count)
+                    # Run all training steps
+                    run_training_iteration(loop_index, self.data_generator.count)
 
-                loop_index += 1
+                    loop_index += 1
 
-            # ================== within epoch loop end ==========================
+                # ================== within epoch loop end ==========================
 
-            if epoch % self.save_interval == 0:
-                print('\n', '\n', '-------------------------Saving results for epoch', epoch, '-------------------------', '\n', '\n')
-                self.previewEpoch(epoch, real_images_A[0], real_images_B[0])
+                if epoch % self.save_interval == 0 or epoch == self.epochs:
+                    print('\n', '\n', '-------------------------Saving results for epoch', epoch, '-------------------------', '\n', '\n')
+                    self.previewEpoch(epoch, real_images_A[0], real_images_B[0])
 
-                self.G_model.save(f'{self.model_folder}/{self.G_model.name}_epoch_{epoch}.h5')
-                self.D_A.save(f'{self.model_folder}/{self.D_A.name}_epoch_{epoch}.h5')
-                self.D_B.save(f'{self.model_folder}/{self.D_B.name}_epoch_{epoch}.h5')
-                self.G_A2B.save(f'{self.model_folder}/{self.G_A2B.name}_epoch_{epoch}.h5')
-                self.G_B2A.save(f'{self.model_folder}/{self.G_B2A.name}_epoch_{epoch}.h5')
+                    self.G_model.save(f'{self.model_folder}/{self.G_model.name}_epoch_{epoch}.h5')
+                    self.D_A.save(f'{self.model_folder}/{self.D_A.name}_epoch_{epoch}.h5')
+                    self.D_B.save(f'{self.model_folder}/{self.D_B.name}_epoch_{epoch}.h5')
+                    self.G_A2B.save(f'{self.model_folder}/{self.G_A2B.name}_epoch_{epoch}.h5')
+                    self.G_B2A.save(f'{self.model_folder}/{self.G_B2A.name}_epoch_{epoch}.h5')
 
-                # save the last one as formal
-                self.G_A2B.save(self.flags.refiner_forward_model_path)
-                self.G_B2A.save(self.flags.refiner_backward_model_path)
+                    # save the last one as formal
+                    self.G_A2B.save(self.flags.refiner_forward_model_path)
+                    self.G_B2A.save(self.flags.refiner_backward_model_path)
 
-            training_history = {
-                'DA_losses': DA_losses,
-                'DB_losses': DB_losses,
-                'gA_d_losses_synthetic': gA_d_losses_synthetic,
-                'gB_d_losses_synthetic': gB_d_losses_synthetic,
-                'gA_losses_reconstructed': gA_losses_reconstructed,
-                'gB_losses_reconstructed': gB_losses_reconstructed,
-                'D_losses': D_losses,
-                'G_losses': G_losses,
-                'reconstruction_losses': reconstruction_losses}
-            self.writeLossDataToFile(training_history)
+                training_history = {
+                    'DA_losses': DA_losses,
+                    'DB_losses': DB_losses,
+                    'gA_d_losses_synthetic': gA_d_losses_synthetic,
+                    'gB_d_losses_synthetic': gB_d_losses_synthetic,
+                    'gA_losses_reconstructed': gA_losses_reconstructed,
+                    'gB_losses_reconstructed': gB_losses_reconstructed,
+                    'D_losses': D_losses,
+                    'G_losses': G_losses,
+                    'reconstruction_losses': reconstruction_losses}
+                self.writeLossDataToFile(training_history)
 
-            # Flush out prints each loop iteration
-            sys.stdout.flush()
+                # Flush out prints each loop iteration
+                sys.stdout.flush()
+        except KeyboardInterrupt:
+            print('Cancelled training...')
 
 # ===============================================================================
 # Help functions
@@ -810,6 +815,14 @@ def parse_args(args=None):
                 'default': 2e-4,
                 'type': float,
                 'help': 'learning rate of generator',
+            }
+        ),
+        (
+            ('--save-interval',),
+            {
+                'default': 5,
+                'type': int,
+                'help': 'epochs',
             }
         ),
         (

@@ -371,15 +371,27 @@ def show_test(images_test, labels_true, labels_pred, classes):
 
     plots = []
     positives = 0
+    chars = len(labels_true[0])
+    false_chars = [0] * chars
     for i, label in enumerate(labels_true):
         cap = '{}({})'.format(get_label_string(labels_pred[i], classes), get_label_string(labels_true[i], classes))
-        correct = np.array_equal(labels_pred[i], label)
+        label_guess = labels_pred[i]
+        correct = np.array_equal(label_guess, label)
         if correct:
             positives += 1
+        else:
+            for j in range(chars):
+                if label_guess[j] != label[j]:
+                    false_chars[j] += 1
         plots.append((images_test[i], cap, not correct))
 
     percent = round(positives / total, 4) * 100
-    plot_images(plots, title=f'Accuracy: {percent}%({positives}/{total})')
+    title = f'Accuracy: {percent}%({positives}/{total})'
+    for i, c in enumerate(false_chars):
+        positives = total - c
+        percent = round(positives / total, 4) * 100
+        title += f' c{i}:{percent}%({positives}/{total})'
+    plot_images(plots, title=title)
 
 
 def plot_images(plots, cols=8, title=None):

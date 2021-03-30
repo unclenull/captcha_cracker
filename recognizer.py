@@ -180,22 +180,25 @@ def train(flags=None):
         )
     # import pdb; pdb.set_trace()
 
-    history = train_model.fit(
-        train_gen,
-        steps_per_epoch=steps_train,
-        epochs=FLAGS.epochs,
-        validation_data=test_gen,
-        validation_steps=steps_test,
-        callbacks=callbacks,
-    )
+    try:
+        history = train_model.fit(
+            train_gen,
+            steps_per_epoch=steps_train,
+            epochs=FLAGS.epochs,
+            validation_data=test_gen,
+            validation_steps=steps_test,
+            callbacks=callbacks,
+        )
+    except KeyboardInterrupt:
+        print('Cancelled training...')
+    finally:
+        show_metrics(history, FLAGS.length, f"{FLAGS.model_dir}/{FLAGS.classes_name}_metrics.png")
 
-    show_metrics(history, FLAGS.length, f"{FLAGS.model_dir}/{FLAGS.classes_name}_metrics.png")
-
-    # re-save a light-weight model
-    model, _ = create_model(img_shape, True)
-    model.load_weights(FLAGS.model_path)
-    model.save(FLAGS.model_path)
-    print('Training done.')
+        # re-save a light-weight model
+        model, _ = create_model(img_shape, True)
+        model.load_weights(FLAGS.model_path)
+        model.save(FLAGS.model_path)
+        print('Training done.')
 
 
 def test():
