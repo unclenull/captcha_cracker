@@ -1,6 +1,7 @@
 from PIL import Image
 from itertools import groupby
 import numpy as np
+
 np.set_printoptions(threshold=9999999999)
 
 
@@ -8,7 +9,7 @@ def _get_start_col_from_min_hist(pixels):
     rows, cols = pixels.shape
     mid = cols // 2
     offset = cols // 6
-    temp = pixels[:rows//2, mid-offset:mid+offset]
+    temp = pixels[: rows // 2, mid - offset : mid + offset]
     histogram_vert = list(np.sum(temp, 0))
     index = histogram_vert.index(min(histogram_vert))
 
@@ -17,11 +18,12 @@ def _get_start_col_from_min_hist(pixels):
 
     if (
         temp[0, index]  # current char
-        and pixels[0, start_x_temp + index-1]  # left char
-        and index < max_x_temp and temp[0, index+1]  # right char
+        and pixels[0, start_x_temp + index - 1]  # left char
+        and index < max_x_temp
+        and temp[0, index + 1]  # right char
     ):  # move to the right background if exists within temp
         new_index = index + 2
-        while (new_index < max_x_temp):
+        while new_index < max_x_temp:
             if not temp[0, new_index]:
                 index = new_index
                 break
@@ -33,8 +35,12 @@ def _get_start_col_from_min_hist(pixels):
 def _get_weight_index(index, cur_p):
     row, col = cur_p
     return [
-        None, (row+1, col-1), (row+1, col),
-        (row+1, col+1), (row, col+1), (row, col-1)
+        None,
+        (row + 1, col - 1),
+        (row + 1, col),
+        (row + 1, col + 1),
+        (row, col + 1),
+        (row, col - 1),
     ][index]
 
 
@@ -48,7 +54,7 @@ def _get_end_route(pixels, start_col):
     end_route.append(cur_p)
     # is_last_black = False
 
-    while cur_p[0] < (rows-1):
+    while cur_p[0] < (rows - 1):
         sum_w = 0
         max_w = 0
         cur_row, cur_col = cur_p
@@ -58,7 +64,7 @@ def _get_end_route(pixels, start_col):
                 continue
             if (i == 3 or i == 4) and cur_col == right_limit:
                 continue
-            cur_w = (1 - pixels[_get_weight_index(i, cur_p)]//255) * (6-i)
+            cur_w = (1 - pixels[_get_weight_index(i, cur_p)] // 255) * (6 - i)
             sum_w += cur_w
             if max_w < cur_w:
                 max_w = cur_w
@@ -80,16 +86,16 @@ def _get_end_route(pixels, start_col):
             next_col = cur_col
             next_row = cur_row + 1
         elif max_w == 5:
-            if cur_col < right_limit and not pixels[cur_row+1, cur_col+1]:
+            if cur_col < right_limit and not pixels[cur_row + 1, cur_col + 1]:
                 # No.3 is black
                 # pick the nearest to char
                 count = 2
-                while cur_col-count > 0 and cur_col+count < right_limit:
-                    if not pixels[cur_row+1, cur_col-count]:
+                while cur_col - count > 0 and cur_col + count < right_limit:
+                    if not pixels[cur_row + 1, cur_col - count]:
                         next_col = cur_col - 1
                         next_row = cur_row + 1
                         break
-                    elif pixels[cur_row+1, cur_col+count]:
+                    elif pixels[cur_row + 1, cur_col + count]:
                         next_col = cur_col + 1
                         next_row = cur_row + 1
                         break
@@ -146,7 +152,7 @@ def _get_end_route(pixels, start_col):
 
 
 def _show_split(pixels, end_route):
-    img = Image.fromarray(pixels).convert('RGB')
+    img = Image.fromarray(pixels).convert("RGB")
     img = np.array(img)
     for i in end_route:
         img[tuple(i)] = [255, 0, 0]
@@ -166,22 +172,23 @@ def split_dropfall(pixels):
     # import pdb; pdb.set_trace()
     _show_split(pixels, end_route)
 
-    end_route = [max(list(points)) for _, points in groupby(
-        end_route, lambda x:x[0])]  # remove duplicate rows
+    end_route = [
+        max(list(points)) for _, points in groupby(end_route, lambda x: x[0])
+    ]  # remove duplicate rows
 
     col_max = 0
     shortened_cols = []
     for dot in end_route:
         if not pixels[dot]:  # move left to char when background
             while dot[1] > col_max and not pixels[dot]:
-                dot = (dot[0], dot[1]-1)
+                dot = (dot[0], dot[1] - 1)
         col_max = max(col_max, dot[1])
         shortened_cols.append(dot[1])
 
-    img1 = np.full((rows, col_max+1), 0, dtype='uint8')
+    img1 = np.full((rows, col_max + 1), 0, dtype="uint8")
     for r in range(rows):
         c = shortened_cols[r]
-        img1[r, 0:c+1] = pixels[r, 0:c+1]
+        img1[r, 0 : c + 1] = pixels[r, 0 : c + 1]
     # Image.fromarray(img1.astype('bool')).save('a1.tif')
     # Image.fromarray(img1.astype('bool')).show()
 
@@ -190,17 +197,17 @@ def split_dropfall(pixels):
     for dot in end_route:
         if not pixels[dot]:  # move right to char when background
             while dot[1] < col_min and not pixels[dot]:
-                dot = (dot[0], dot[1]+1)
+                dot = (dot[0], dot[1] + 1)
         else:  # move to the next col
-            dot = (dot[0], min(dot[1]+1, cols - 1))
+            dot = (dot[0], min(dot[1] + 1, cols - 1))
         col_min = min(col_min, dot[1])
         expanded_cols.append(dot[1])
 
     width = cols - col_min
-    img2 = np.full((rows, width), 0, dtype='uint8')
+    img2 = np.full((rows, width), 0, dtype="uint8")
     for r in range(rows):
         c = expanded_cols[r]
-        img2[r, c-col_min:] = pixels[r, c:]
+        img2[r, c - col_min :] = pixels[r, c:]
 
     # Image.fromarray(img2).save('a2.tif')
     # Image.fromarray(img2).show()
