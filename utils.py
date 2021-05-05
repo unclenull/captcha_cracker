@@ -71,14 +71,13 @@ def parse_args(extra=None, args=None):
     parser.add_argument(
         '--gen', '--generator',
         type=str,
-        help='custom generator path')
+        help='custom generator path for recognizer')
     parser.add_argument(
         '--syn', '--synthesizer',
         type=str,
-        help='custom synthesizer path')
+        help='custom synthesizer path for refiner')
     parser.add_argument(
         '--syn-conf',
-        default='',
         type=str,
         help='config file path for the builtin synthesizer')
 
@@ -97,7 +96,7 @@ def parse_args(extra=None, args=None):
 
     name = classes = FLAGS.classes or ''
     if not classes:
-        if os.path.isfile(FLAGS.syn_conf):
+        if FLAGS.syn_conf is not None and os.path.isfile(FLAGS.syn_conf):
             FLAGS.syn_conf = imp.load_source('captcha.conf', FLAGS.syn_conf)
             if FLAGS.syn_conf.charset_classes is not None:
                 if '0' in FLAGS.syn_conf.charset_classes:

@@ -24,7 +24,7 @@ import json
 import csv
 import sys
 import os
-from os.path import exists, join, dirname
+from os.path import exists, join
 from pathlib import Path
 
 import keras.backend as K
@@ -38,7 +38,7 @@ np.random.seed(seed=12345)
 physical_devices = tf.config.experimental.list_physical_devices('GPU')
 tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
-BASE_FOLDER = 'refiner'
+BASE_FOLDER = 'refiner_tmp'
 MODELS_FOLDER = 'models'
 MODEL_G_A2B = 'G_A2B_model'
 MODEL_G_B2A = 'G_B2A_model'
